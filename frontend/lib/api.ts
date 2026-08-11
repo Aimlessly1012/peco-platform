@@ -12,15 +12,64 @@ export interface Project {
   updated_at: string;
 }
 
+/** 六阶段（M3 新增 report「生成报告」）。 */
+export type JobStage =
+  | "clone"
+  | "parse"
+  | "summarize"
+  | "embed"
+  | "graph"
+  | "report";
+
 export interface IndexJob {
   id: string;
   project_id: string;
   kind: string;
   status: "running" | "succeeded" | "failed";
-  stage: "clone" | "parse" | "summarize" | "embed" | "graph";
+  stage: JobStage;
   progress: number;
-  stats_json: Record<string, number>;
+  /** 后端统计字典，键随阶段增长（M3 新增 sequences_ok / sequences_fallback）。 */
+  stats_json: Record<string, number | string | boolean>;
   error_text: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+/** 单个模块的核心流程时序图（后端 sequences_json 元素）。 */
+export interface SequenceDiagram {
+  module_key: string;
+  module_name: string;
+  mermaid: string;
+  /** mermaid 生成/校验失败时的文字版链路降级内容。 */
+  fallback_text: string | null;
+}
+
+/** GET /projects/{id}/report —— 理解报告三件套。404 表示尚未生成。 */
+export interface UnderstandingReport {
+  doc_markdown: string;
+  mindmap_mermaid: string;
+  sequences: SequenceDiagram[];
+  generated_at: string;
+}
+
+export type ModuleKind = "page" | "api" | "dir" | "shared";
+
+export interface ModuleFile {
+  path: string;
+  summary: string | null;
+}
+
+export interface ModuleInfo {
+  name: string;
+  kind: ModuleKind;
+  route_prefix: string | null;
+  summary: string | null;
+  files: ModuleFile[];
+}
+
+/** GET /projects/{id}/modules —— 功能地图（实时读图库）。 */
+export interface ModuleMap {
+  modules: ModuleInfo[];
 }
 
 export interface ChatSession {
@@ -47,6 +96,21 @@ export interface ChatMessage {
   created_at: string;
 }
 
+/** 带 HTTP 状态码的错误，便于区分 404（如「尚无报告」）与其他失败。 */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isNotFound(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -54,7 +118,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `请求失败 (${res.status})`);
+    throw new ApiError(body.detail || `请求失败 (${res.status})`, res.status);
   }
   if (res.status === 204) return undefined as T;
   return res.json();

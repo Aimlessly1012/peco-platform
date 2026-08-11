@@ -1,7 +1,8 @@
-"""索引管道编排（M2 五阶段）：clone → parse → summarize → embed → graph。
+"""索引管道编排（M3 六阶段）：clone → parse → summarize → embed → graph → report。
 
-进度区间：clone 0-10, parse 10-25, summarize 25-55, embed 55-85, graph 85-100。
+进度区间：clone 0-10, parse 10-25, summarize 25-55, embed 55-85, graph 85-92, report 92-100。
 嵌入缓存键 = 嵌入文本 hash（embed_key）而非代码 hash——摘要/归属变化时向量随之重算。
+report 阶段读图产出理解报告，任何失败只把任务标 partial，不阻塞索引成功（M3 spec）。
 """
 import asyncio
 import hashlib
@@ -36,6 +37,7 @@ from app.services.ingest.module_mapper import (
 from app.services.ingest.router_parser import ModuleMap, parse_routes
 from app.services.ingest.summarizer import fallback_summary, module_agg_hash, summarizer
 from app.services.ingest.walker import LANGUAGE_BY_EXT, walk_repo
+from app.services.report.service import generate_and_store_report
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,18 @@ def build_embed_text(
         f"[文件职责: {file_summary[:120] if file_summary else '未知'}]\n"
         f"{chunk.code}"
     )
+
+
+def partial_reason(summary_partial: bool, report_stats: dict) -> str | None:
+    """汇总本次索引的降级原因（None = 全程正常）。索引仍算成功，只写进 error_text。"""
+    reasons: list[str] = []
+    if summary_partial:
+        reasons.append("部分摘要生成失败，已用符号清单占位")
+    if report_stats.get("report_error"):
+        reasons.append(f"理解报告生成失败：{report_stats['report_error']}")
+    elif report_stats.get("report_partial"):
+        reasons.append("部分报告内容已降级（需求文档或时序图）")
+    return "；".join(reasons) + "（partial）" if reasons else None
 
 
 async def _update_job(job_id: uuid.UUID, **values) -> None:
@@ -290,7 +304,7 @@ async def run_index_job(job_id: uuid.UUID, project_id: uuid.UUID) -> None:
         # ---- summarize (25-55) ----
         await _update_job(job_id, stage=JobStage.SUMMARIZE)
         readme = await asyncio.to_thread(_read_readme, repo_dir)
-        module_summaries, project_summary, partial = await _summarize_all(
+        module_summaries, project_summary, summary_partial = await _summarize_all(
             pid, module_map, files, chunks, imports, heads, readme, stats
         )
         module_hashes = stats.pop("_module_hashes", {})
@@ -361,7 +375,7 @@ async def run_index_job(job_id: uuid.UUID, project_id: uuid.UUID) -> None:
         stats["embedded_cached"] = len(seen) - len(to_embed)
         await _update_job(job_id, progress=85, stats_json=stats)
 
-        # ---- graph (85-100)：Chunk 节点的缓存键属性由 graph_writer 存 embed_key ----
+        # ---- graph (85-92)：Chunk 节点的缓存键属性由 graph_writer 存 embed_key ----
         await _update_job(job_id, stage=JobStage.GRAPH)
         context_texts = {h: embed_texts[h] for h in embed_texts}
         # 把 embed_key 写进 context 映射供 graph_writer 使用：直接替换 content_hash 语义不动，
@@ -371,9 +385,18 @@ async def run_index_job(job_id: uuid.UUID, project_id: uuid.UUID) -> None:
             context_texts, embeddings, api_edges,
             embed_keys=embed_keys,
         )
+        await _update_job(job_id, progress=92, stats_json=stats)
+
+        # ---- report (92-100)：读图产报告，失败只标 partial（M3 spec：不阻塞索引成功）----
+        await _update_job(job_id, stage=JobStage.REPORT)
+        report_stats = await generate_and_store_report(project_id)
+        stats.update(report_stats)
+        await _update_job(job_id, stats_json=stats)
+
         await _finish(job_id, project_id, commit_sha=commit_sha)
-        if partial:
-            await _update_job(job_id, error_text="部分摘要生成失败，已用符号清单占位（partial）")
+        reason = partial_reason(summary_partial, report_stats)
+        if reason:
+            await _update_job(job_id, error_text=reason)
         logger.info("项目 %s 索引完成: %s", name, stats)
 
     except GitPullError as e:

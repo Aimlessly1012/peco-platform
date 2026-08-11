@@ -25,12 +25,16 @@ class RetrievedItem:
     via_edge: str | None = None  # None=直接命中；defines_file/calls_api/imports=关联带出
 
     def citation(self) -> dict:
+        """出处条目。顺序与提示词里的「资料 N」编号一一对应（N = 下标 + 1），
+        答案中的 [n] 上标即按此定位，因此关联带出项也必须在列，不能过滤。"""
         return {
             "file_path": self.file_path or f"[模块] {self.symbol}",
             "start_line": self.start_line,
             "end_line": self.end_line,
             "node_id": self.node_id,
             "symbol": self.symbol,
+            "kind": self.kind,          # chunk / file_summary / module_summary
+            "via_edge": self.via_edge,  # None=直接命中；其余为关联带出的边类型
         }
 
 

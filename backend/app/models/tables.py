@@ -27,11 +27,15 @@ class JobStatus:
 
 
 class JobStage:
+    """六阶段（M3 新增 report）。进度区间：clone 0-10, parse 10-25, summarize 25-55,
+    embed 55-85, graph 85-92, report 92-100。"""
+
     CLONE = "clone"
     PARSE = "parse"
     SUMMARIZE = "summarize"
     EMBED = "embed"
     GRAPH = "graph"
+    REPORT = "report"
 
 
 class Project(Base):
@@ -55,6 +59,9 @@ class Project(Base):
     sessions: Mapped[list["ChatSession"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    report: Mapped["UnderstandingReport | None"] = relationship(
+        back_populates="project", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class IndexJob(Base):
@@ -76,6 +83,28 @@ class IndexJob(Base):
     )
 
     project: Mapped[Project] = relationship(back_populates="jobs")
+
+
+class UnderstandingReport(Base):
+    """项目理解报告：一项目一行（project_id unique），重索引覆盖写（设计 D3）。
+
+    sequences_json: [{module_key, module_name, mermaid, fallback_text}]
+    """
+
+    __tablename__ = "understanding_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True
+    )
+    doc_markdown: Mapped[str] = mapped_column(Text, default="")
+    mindmap_mermaid: Mapped[str] = mapped_column(Text, default="")
+    sequences_json: Mapped[list] = mapped_column(JSON, default=list)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    project: Mapped[Project] = relationship(back_populates="report")
 
 
 class ChatSession(Base):

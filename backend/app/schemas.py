@@ -40,6 +40,51 @@ class IndexJobOut(BaseModel):
     finished_at: datetime | None
 
 
+class SequenceOut(BaseModel):
+    """单张模块时序图；mermaid 为空表示两次校验均失败，前端显示 fallback_text。"""
+
+    module_key: str
+    module_name: str
+    kind: str = ""
+    route_prefix: str = ""
+    mermaid: str = ""
+    fallback_text: str = ""
+
+
+class ReportOut(BaseModel):
+    """理解报告三件套（设计 D3）。"""
+
+    project_id: uuid.UUID
+    doc_markdown: str
+    mindmap_mermaid: str
+    sequences: list[SequenceOut]
+    generated_at: datetime
+
+
+class ModuleFileOut(BaseModel):
+    path: str
+    language: str = ""
+    summary: str = ""  # L2 文件摘要
+
+
+class ModuleOut(BaseModel):
+    key: str
+    name: str
+    kind: str
+    route_prefix: str = ""
+    summary: str = ""  # L3 模块摘要
+    files: list[ModuleFileOut]
+
+
+class ModuleMapOut(BaseModel):
+    """功能地图：实时读 Neo4j 的模块→文件树。"""
+
+    project_id: uuid.UUID
+    project_name: str
+    project_summary: str  # L4 项目总览
+    modules: list[ModuleOut]
+
+
 class ChatSessionCreate(BaseModel):
     title: str | None = None
 

@@ -10,9 +10,16 @@ from app.core.config import settings
 from app.core.crypto import encrypt_token
 from app.core.db import get_session
 from app.graph.client import delete_project_graph
-from app.models.tables import IndexJob, Project
-from app.schemas import IndexJobOut, ProjectCreate, ProjectOut
+from app.models.tables import IndexJob, Project, UnderstandingReport
+from app.schemas import (
+    IndexJobOut,
+    ModuleMapOut,
+    ProjectCreate,
+    ProjectOut,
+    ReportOut,
+)
 from app.services.ingest.pipeline import start_index_job
+from app.services.report.graph_reader import read_project_tree
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -90,6 +97,54 @@ async def list_jobs(
         .limit(20)
     )
     return list(result)
+
+
+@router.get("/{project_id}/report", response_model=ReportOut)
+async def get_report(
+    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+):
+    """理解报告三件套。无报告 = 索引早于 M3 或未完成（spec: 404 附提示）。"""
+    await _get_project_or_404(project_id, session)
+    report = await session.scalar(
+        select(UnderstandingReport).where(UnderstandingReport.project_id == project_id)
+    )
+    if report is None:
+        raise HTTPException(404, "该项目还没有理解报告，请重新索引以生成报告")
+    return ReportOut(
+        project_id=report.project_id,
+        doc_markdown=report.doc_markdown,
+        mindmap_mermaid=report.mindmap_mermaid,
+        sequences=report.sequences_json or [],
+        generated_at=report.generated_at,
+    )
+
+
+@router.get("/{project_id}/modules", response_model=ModuleMapOut)
+async def get_modules(
+    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+):
+    """功能地图：实时读 Neo4j（未索引的项目返回空模块列表，由前端引导索引）。"""
+    project = await _get_project_or_404(project_id, session)
+    tree = await read_project_tree(str(project_id))
+    return ModuleMapOut(
+        project_id=project_id,
+        project_name=tree.name or project.name,
+        project_summary=tree.summary,
+        modules=[
+            {
+                "key": m.key,
+                "name": m.name,
+                "kind": m.kind,
+                "route_prefix": m.route_prefix,
+                "summary": m.summary,
+                "files": [
+                    {"path": f.path, "language": f.language, "summary": f.summary}
+                    for f in m.files
+                ],
+            }
+            for m in tree.modules
+        ],
+    )
 
 
 @router.get("/{project_id}/jobs/latest", response_model=IndexJobOut)

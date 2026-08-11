@@ -5,9 +5,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
+from app.api.chat import router as chat_router
+from app.api.projects import router as projects_router
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.graph.client import close_driver, ensure_vector_index
+from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
 
 logging.basicConfig(level=logging.INFO)
@@ -39,27 +42,40 @@ async def lifespan(app: FastAPI):
     await ensure_vector_index()
     await _recover_stale_jobs()
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
-    yield
+    # MCP session manager 必须在这里启动：Starlette 的 Mount 不传播 lifespan，
+    # 子应用自带的 lifespan 不会被触发（设计 D4）。
+    async with mcp.session_manager.run():
+        logger.info("MCP 端点已就绪：POST /mcp（streamable-http）")
+        yield
     await close_driver()
 
 
-app = FastAPI(title="RAG Coder", lifespan=lifespan)
+def create_app() -> FastAPI:
+    """应用工厂。
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    每次调用都重建 MCP 子应用——StreamableHTTPSessionManager 的 run() 每实例只能进入一次，
+    复用同一个实例的第二个 app 启动时会直接抛错（测试里连着起两个 app 就会踩到）。
+    """
+    app = FastAPI(title="RAG Coder", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    app.include_router(projects_router)
+    app.include_router(chat_router)
+
+    # MCP 挂在根路径、且必须在业务路由之后注册：MCP 子应用内部持有 /mcp 路由，
+    # 挂到 /mcp 会变成 /mcp/mcp（挂 /mcp 且子路径设 "/" 则 POST 会吃到 307 重定向）。
+    # FastAPI 按注册顺序匹配，业务路由优先，未匹配的路径才落到 MCP 子应用。
+    app.mount("/", mcp_http_app())
+    return app
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-from app.api.projects import router as projects_router  # noqa: E402
-from app.api.chat import router as chat_router  # noqa: E402
-
-app.include_router(projects_router)
-app.include_router(chat_router)
+app = create_app()

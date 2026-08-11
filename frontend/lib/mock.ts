@@ -1,0 +1,132 @@
+/**
+ * 仅用于后端接口尚未就绪时的前端自测：详情页 URL 加 `?mock=1` 即用本文件的假数据渲染，
+ * 不影响正常访问。后端联调通过后可整文件删除（只被 app/projects/[id]/page.tsx 引用）。
+ */
+import type { IndexJob, ModuleMap, UnderstandingReport } from "./api";
+
+export function isMockMode(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("mock") === "1";
+}
+
+export const MOCK_REPORT: UnderstandingReport = {
+  generated_at: new Date().toISOString(),
+  doc_markdown: [
+    "## 项目总览",
+    "",
+    "示例电商后台：前端 Next.js 负责下单与订单管理页面，后端 FastAPI 提供订单、商品、用户三组接口。",
+    "",
+    "## 订单模块（/api/orders）",
+    "",
+    "- **创建订单**：校验库存后写入 orders 表，返回订单号。",
+    "- **订单查询**：按用户与状态分页查询。",
+    "",
+    "## 商品模块（/api/products）",
+    "",
+    "维护商品与库存，下单链路依赖其库存扣减接口。",
+  ].join("\n"),
+  mindmap_mermaid: [
+    "mindmap",
+    "  root((示例项目))",
+    "    订单(orders · api · /api/orders)",
+    "      api/orders/create.py",
+    "      api/orders/query.py",
+    "    商品(products · api · /api/products)",
+    "      api/products/stock.py",
+    "    下单页(checkout · page · /checkout)",
+    "      app/checkout/page.tsx",
+  ].join("\n"),
+  sequences: [
+    {
+      module_key: "api:orders",
+      module_name: "订单模块",
+      mermaid: [
+        "sequenceDiagram",
+        "    participant U as 用户",
+        "    participant P as 下单页 app/checkout/page.tsx",
+        "    participant A as 订单接口 api/orders/create.py",
+        "    participant S as 库存服务 api/products/stock.py",
+        "    U->>P: 提交订单",
+        "    P->>A: POST /api/orders",
+        "    A->>S: 扣减库存",
+        "    S-->>A: 扣减结果",
+        "    A-->>P: 订单号",
+      ].join("\n"),
+      fallback_text: null,
+    },
+    {
+      module_key: "api:products",
+      module_name: "商品模块（演示渲染失败兜底）",
+      mermaid: "sequenceDiagram\n    这不是合法的 mermaid 语法 %%%",
+      fallback_text:
+        "下单页 → POST /api/products/stock → 库存服务 stock.py:12-48 → products 表",
+    },
+  ],
+};
+
+export const MOCK_MODULES: ModuleMap = {
+  modules: [
+    {
+      name: "下单页",
+      kind: "page",
+      route_prefix: "/checkout",
+      summary: "下单主流程页面，收集收货信息并调用订单创建接口。",
+      files: [
+        { path: "app/checkout/page.tsx", summary: "下单页组件，表单校验后提交订单。" },
+        { path: "app/checkout/hooks.ts", summary: "下单页数据获取与提交 hook。" },
+      ],
+    },
+    {
+      name: "订单模块",
+      kind: "api",
+      route_prefix: "/api/orders",
+      summary: "订单创建、查询与状态流转接口。",
+      files: [
+        { path: "api/orders/create.py", summary: "创建订单：校验库存、写库、返回订单号。" },
+        { path: "api/orders/query.py", summary: "按用户与状态分页查询订单。" },
+      ],
+    },
+    {
+      name: "公共工具",
+      kind: "shared",
+      route_prefix: null,
+      summary: "跨模块复用的鉴权、日志与序列化工具。",
+      files: [{ path: "lib/auth.py", summary: "JWT 解析与权限校验。" }],
+    },
+  ],
+};
+
+export const MOCK_JOBS: IndexJob[] = [
+  {
+    id: "mock-job-1",
+    project_id: "mock",
+    kind: "full",
+    status: "succeeded",
+    stage: "report",
+    progress: 100,
+    stats_json: {
+      files_parsed: 128,
+      files_skipped: 12,
+      chunks: 964,
+      modules: 9,
+      api_edges: 23,
+      sequences_ok: 5,
+      sequences_fallback: 1,
+    },
+    error_text: null,
+    started_at: new Date(Date.now() - 600_000).toISOString(),
+    finished_at: new Date(Date.now() - 120_000).toISOString(),
+  },
+  {
+    id: "mock-job-2",
+    project_id: "mock",
+    kind: "full",
+    status: "failed",
+    stage: "clone",
+    progress: 5,
+    stats_json: {},
+    error_text: "克隆失败：认证被拒绝（请检查访问 Token）",
+    started_at: new Date(Date.now() - 86_400_000).toISOString(),
+    finished_at: new Date(Date.now() - 86_390_000).toISOString(),
+  },
+];

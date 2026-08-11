@@ -1,27 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import StageBar from "@/components/StageBar";
 import { api, IndexJob, Project } from "@/lib/api";
+import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/labels";
 
-const STATUS_BADGE: Record<Project["status"], { label: string; cls: string }> = {
-  pending: { label: "待索引", cls: "bg-zinc-100 text-zinc-600" },
-  indexing: { label: "索引中", cls: "bg-blue-100 text-blue-700" },
-  ready: { label: "就绪", cls: "bg-emerald-100 text-emerald-700" },
-  failed: { label: "失败", cls: "bg-red-100 text-red-700" },
-};
+const COLS = "grid-cols-[14px_1fr_150px_150px_176px]";
 
-const STAGE_LABEL: Record<IndexJob["stage"], string> = {
-  clone: "拉取代码",
-  parse: "解析分块",
-  summarize: "生成摘要",
-  embed: "向量化",
-  graph: "写入图谱",
-};
+type Filter = "all" | "indexing" | "failed";
 
 export default function ProjectListPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Record<string, IndexJob>>({});
   const [showDialog, setShowDialog] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -74,102 +66,201 @@ export default function ProjectListPage() {
     }
   };
 
+  const shown = useMemo(
+    () => (filter === "all" ? projects : projects.filter((p) => p.status === filter)),
+    [projects, filter]
+  );
+  const indexingCount = projects.filter((p) => p.status === "indexing").length;
+
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">项目</h1>
-        <button
-          onClick={() => setShowDialog(true)}
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-        >
-          + 录入项目
-        </button>
+    <div className="flex min-h-0 flex-1">
+      {/* 左栏：统计与筛选 */}
+      <aside className="hidden w-[212px] flex-none flex-col gap-7 border-r border-line bg-canvas px-5 py-6 md:flex">
+        <div className="flex flex-col gap-1.5">
+          <div className="text-[10px] tracking-label text-dim">PROJECTS</div>
+          <div className="text-[38px] font-semibold leading-none">
+            {String(projects.length).padStart(2, "0")}
+          </div>
+          <div className="text-[11px] text-muted">
+            {indexingCount > 0 ? `${indexingCount} 正在索引` : "全部空闲"}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] tracking-label text-dim">FILTER</div>
+          {(["all", "indexing", "failed"] as Filter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`flex gap-2 text-left text-xs ${
+                filter === f ? "font-medium text-accent" : "text-muted hover:text-ink"
+              }`}
+            >
+              <span>{filter === f ? "▸" : " "}</span>
+              <span>{f}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-auto text-[11px] leading-relaxed text-faint">
+          MCP
+          <br />
+          <a href="/mcp-guide" className="text-muted hover:text-accent">
+            localhost:8001/mcp
+          </a>
+        </div>
+      </aside>
+
+      {/* 主区 */}
+      <div className="flex min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto px-7 py-6">
+        <div className="flex items-end justify-between">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-[22px] font-semibold">项目</h1>
+            <span className="text-[11px] text-dim">
+              $ ls --status<span className="text-accent">_</span>
+            </span>
+          </div>
+          <button
+            onClick={() => setShowDialog(true)}
+            className="border border-accent bg-accent/[.06] px-4 py-2 text-xs font-medium tracking-wide text-accent hover:bg-accent/[.12]"
+          >
+            + 录入项目
+          </button>
+        </div>
+
+        {error && (
+          <div className="border-l-2 border-danger bg-danger/[.06] px-3 py-2 text-xs text-danger">
+            {error}
+          </div>
+        )}
+
+        {shown.length === 0 ? (
+          <div className="border border-dashed border-line py-16 text-center text-sm text-faint">
+            {projects.length === 0
+              ? "还没有项目，点击右上角「录入项目」开始"
+              : `没有 ${filter} 状态的项目`}
+          </div>
+        ) : (
+          <div className="flex flex-col overflow-x-auto border border-line bg-panel">
+            <div
+              className={`grid ${COLS} min-w-[860px] gap-4 border-b border-line bg-shade px-4 py-[9px] text-[10px] tracking-label text-dim`}
+            >
+              <span />
+              <span>PROJECT</span>
+              <span>COMMIT</span>
+              <span>STATUS</span>
+              <span className="text-right">ACTIONS</span>
+            </div>
+
+            {shown.map((p) => {
+              const s = PROJECT_STATUS_BADGE[p.status];
+              const job = jobs[p.id];
+              const isIndexing = p.status === "indexing" && !!job;
+              const isFailed = p.status === "failed";
+              return (
+                <div
+                  key={p.id}
+                  className={`min-w-[860px] border-b border-hair px-4 py-4 last:border-b-0 ${
+                    isIndexing ? "bg-accent/[.04]" : isFailed ? "bg-danger/[.03]" : ""
+                  }`}
+                >
+                  <div className={`grid ${COLS} items-center gap-4`}>
+                    <span
+                      className={`text-xs ${
+                        isFailed
+                          ? "text-danger"
+                          : p.status === "pending"
+                            ? "text-faint"
+                            : "text-accent"
+                      }`}
+                    >
+                      {s.glyph}
+                    </span>
+                    <div className="min-w-0">
+                      <a
+                        href={`/projects/${p.id}`}
+                        className="text-[15px] font-medium hover:text-accent"
+                      >
+                        {p.name}
+                      </a>
+                      <div className="mt-[3px] truncate text-[11px] text-muted">
+                        {p.git_url}
+                        {p.default_branch ? ` · ${p.default_branch}` : ""}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted">
+                      {p.last_indexed_commit ? p.last_indexed_commit.slice(0, 8) : "—"}
+                    </span>
+                    <span
+                      className={`justify-self-start border px-2 py-[3px] text-[11px] tracking-wide ${s.cls}`}
+                    >
+                      {p.status === "indexing" && job ? `INDEXING ${job.progress}%` : s.label}
+                    </span>
+                    <div className="flex justify-end gap-2 text-[11px]">
+                      <a
+                        href={`/projects/${p.id}`}
+                        className="border border-line px-[10px] py-[5px] text-muted hover:border-ink hover:text-ink"
+                      >
+                        详情
+                      </a>
+                      {p.status === "ready" ? (
+                        <a
+                          href={`/projects/${p.id}/chat`}
+                          className="bg-ink px-[10px] py-[5px] font-medium text-paper"
+                        >
+                          聊天
+                        </a>
+                      ) : (
+                        <span className="border border-hair px-[10px] py-[5px] text-faint">
+                          聊天
+                        </span>
+                      )}
+                      <button
+                        onClick={() => triggerIndex(p.id)}
+                        disabled={p.status === "indexing"}
+                        title={p.status === "pending" ? "开始索引" : "重新索引"}
+                        className="border border-line px-[10px] py-[5px] text-muted hover:text-ink disabled:opacity-40"
+                      >
+                        {p.status === "pending" ? "开始索引" : "⟳"}
+                      </button>
+                      <button
+                        onClick={() => remove(p)}
+                        title="删除项目"
+                        className="px-1 text-danger hover:underline"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  {isIndexing && (
+                    <div className="mt-3.5 flex items-center gap-3.5">
+                      <StageBar stage={job.stage} progress={job.progress} />
+                      <span className="whitespace-nowrap text-[11px] text-muted">
+                        {statNumber(job.stats_json, "embedded", "embedded_new")}/
+                        {statNumber(job.stats_json, "chunks")} chunk
+                        {statNumber(job.stats_json, "embedded_cached")
+                          ? ` · cached ${statNumber(job.stats_json, "embedded_cached")}`
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+
+                  {isFailed && job?.error_text && (
+                    <div className="mt-3 border-l-2 border-danger bg-danger/[.05] px-3 py-2 text-[11px] leading-relaxed text-danger">
+                      stage={job.stage} · {job.error_text}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-auto text-[11px] text-faint">
+          每 2s 轮询 /projects · 索引完成后状态自动转「就绪」
+        </div>
       </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {projects.length === 0 ? (
-        <div className="rounded-xl border border-dashed py-16 text-center text-zinc-400">
-          还没有项目，点击右上角「录入项目」开始
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {projects.map((p) => {
-            const badge = STATUS_BADGE[p.status];
-            const job = jobs[p.id];
-            return (
-              <div key={p.id} className="rounded-xl border bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="font-medium">{p.name}</div>
-                    <div className="mt-0.5 break-all text-xs text-zinc-500">{p.git_url}</div>
-                  </div>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${badge.cls}`}>
-                    {badge.label}
-                  </span>
-                </div>
-
-                {p.status === "indexing" && job && (
-                  <div className="mt-3">
-                    <div className="mb-1 flex justify-between text-xs text-zinc-500">
-                      <span>{STAGE_LABEL[job.stage]}</span>
-                      <span>{job.progress}%</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-100">
-                      <div
-                        className="h-full rounded-full bg-blue-500 transition-all"
-                        style={{ width: `${job.progress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {p.status === "failed" && job?.error_text && (
-                  <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
-                    {job.error_text}
-                  </div>
-                )}
-
-                {p.status === "ready" && (
-                  <div className="mt-2 text-xs text-zinc-400">
-                    commit {p.last_indexed_commit?.slice(0, 8)}
-                  </div>
-                )}
-
-                <div className="mt-4 flex gap-2">
-                  <a
-                    href={`/projects/${p.id}/chat`}
-                    className={`rounded-lg px-3 py-1.5 text-sm ${
-                      p.status === "ready"
-                        ? "bg-zinc-900 text-white hover:bg-zinc-700"
-                        : "pointer-events-none bg-zinc-100 text-zinc-400"
-                    }`}
-                  >
-                    聊天
-                  </a>
-                  <button
-                    onClick={() => triggerIndex(p.id)}
-                    disabled={p.status === "indexing"}
-                    className="rounded-lg border px-3 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
-                  >
-                    {p.status === "pending" ? "开始索引" : "重新索引"}
-                  </button>
-                  <button
-                    onClick={() => remove(p)}
-                    className="ml-auto rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {showDialog && (
         <NewProjectDialog
@@ -220,34 +311,86 @@ function NewProjectDialog({
     }
   };
 
-  const field = "w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300";
+  const label = "text-[10px] tracking-wide text-dim";
+  const field =
+    "w-full border border-line bg-shade px-3 py-2 text-[12.5px] focus:border-accent focus:bg-panel";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold">录入项目</h2>
-        <div className="space-y-3">
-          <input className={field} placeholder="项目名称 *" value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className={field} placeholder="Git 地址（https）*" value={form.git_url}
-            onChange={(e) => setForm({ ...form, git_url: e.target.value })} />
-          <input className={field} type="password" placeholder="访问 Token（私有仓必填）" value={form.git_token}
-            onChange={(e) => setForm({ ...form, git_token: e.target.value })} />
-          <input className={field} placeholder="分支（默认主分支）" value={form.default_branch}
-            onChange={(e) => setForm({ ...form, default_branch: e.target.value })} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/[.15] p-4">
+      <div className="w-full max-w-[520px] border border-ink bg-panel shadow-[8px_8px_0_rgba(23,23,26,.07)]">
+        <div className="flex items-center gap-2.5 border-b border-line bg-shade px-[18px] py-3">
+          <span className="block h-2 w-2 bg-accent" />
+          <span className="text-[10px] tracking-label text-dim">NEW PROJECT</span>
         </div>
-        {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border px-4 py-2 text-sm hover:bg-zinc-50">
-            取消
-          </button>
-          <button
-            onClick={submit}
-            disabled={submitting}
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-50"
-          >
-            {submitting ? "提交中…" : "录入并开始索引"}
-          </button>
+        <div className="px-[26px] py-6">
+          <h2 className="mb-5 text-[19px] font-semibold">录入项目</h2>
+          <div className="flex flex-col gap-[15px]">
+            <div className="flex flex-col gap-1.5">
+              <span className={label}>
+                NAME <span className="text-accent">*</span>
+              </span>
+              <input
+                className={field}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className={label}>
+                GIT URL (HTTPS) <span className="text-accent">*</span>
+              </span>
+              <input
+                className={field}
+                placeholder="https://github.com/acme/repo.git"
+                value={form.git_url}
+                onChange={(e) => setForm({ ...form, git_url: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-[13px]">
+              <div className="flex flex-col gap-1.5">
+                <span className={label}>TOKEN</span>
+                <input
+                  className={field}
+                  type="password"
+                  placeholder="私有仓必填"
+                  value={form.git_token}
+                  onChange={(e) => setForm({ ...form, git_token: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className={label}>BRANCH</span>
+                <input
+                  className={field}
+                  placeholder="默认主分支"
+                  value={form.default_branch}
+                  onChange={(e) => setForm({ ...form, default_branch: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          {error && <div className="mt-3 text-xs text-danger">{error}</div>}
+
+          <div className="mt-4 flex items-center gap-2 text-[11px] text-muted">
+            <span className="block h-[5px] w-[5px] bg-accent" />
+            录入后立即开始索引
+          </div>
+
+          <div className="mt-5 flex justify-end gap-[9px]">
+            <button
+              onClick={onClose}
+              className="border border-line px-4 py-[9px] text-[11px] tracking-wide text-muted hover:text-ink"
+            >
+              取消
+            </button>
+            <button
+              onClick={submit}
+              disabled={submitting}
+              className="bg-ink px-4 py-[9px] text-[11px] font-medium tracking-wide text-paper disabled:opacity-50"
+            >
+              {submitting ? "提交中…" : "录入并开始索引"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

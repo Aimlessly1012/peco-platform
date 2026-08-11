@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   api,
@@ -24,6 +24,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -51,10 +52,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         }))
       )
     );
+    setSelected(null);
   }, [activeSession]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = bottomRef.current?.parentElement;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const newSession = useCallback(async () => {
@@ -87,8 +90,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       { role: "user", content: question, citations: [] },
       { role: "assistant", content: "", citations: [], streaming: true },
     ]);
+    setSelected(null);
 
-    const patchLast = (patch: Partial<DisplayMessage> | ((m: DisplayMessage) => Partial<DisplayMessage>)) =>
+    const patchLast = (
+      patch: Partial<DisplayMessage> | ((m: DisplayMessage) => Partial<DisplayMessage>)
+    ) =>
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
@@ -112,80 +118,120 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     });
   };
 
+  /** 右栏显示：选中的回答，否则最后一条带引用的回答 */
+  const sourceIndex = useMemo(() => {
+    if (selected !== null && messages[selected]?.role === "assistant") return selected;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant" && messages[i].citations.length > 0) return i;
+    }
+    return null;
+  }, [selected, messages]);
+  const citations = sourceIndex !== null ? messages[sourceIndex].citations : [];
+
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] gap-4">
+    <div className="flex min-h-0 flex-1">
       {/* 会话侧栏 */}
-      <aside className="hidden w-56 shrink-0 flex-col rounded-xl border bg-white md:flex">
-        <div className="border-b p-3">
-          <button
-            onClick={newSession}
-            className="w-full rounded-lg bg-zinc-900 py-1.5 text-sm text-white hover:bg-zinc-700"
-          >
-            + 新会话
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
+      <aside className="hidden w-[212px] flex-none flex-col gap-4 border-r border-line bg-canvas px-4 py-[18px] md:flex">
+        <button
+          onClick={newSession}
+          className="border border-accent bg-accent/[.06] py-2 text-[11px] font-medium tracking-wide text-accent hover:bg-accent/[.12]"
+        >
+          + 新会话
+        </button>
+        <div className="text-[10px] tracking-label text-dim">SESSIONS</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           {sessions.map((s) => (
             <button
               key={s.id}
               onClick={() => setActiveSession(s.id)}
-              className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-sm ${
-                s.id === activeSession ? "bg-zinc-100 font-medium" : "hover:bg-zinc-50"
+              className={`truncate px-3 py-2 text-left text-xs ${
+                s.id === activeSession
+                  ? "border-l-2 border-accent bg-panel pl-2.5"
+                  : "text-muted hover:text-ink"
               }`}
             >
               {s.title}
             </button>
           ))}
         </div>
+        <div className="text-[10px] leading-relaxed text-faint">
+          RETRIEVAL
+          <br />
+          <span className="text-muted">vector + graph · top_k 8</span>
+        </div>
       </aside>
 
-      {/* 主聊天区 */}
-      <div className="flex min-w-0 flex-1 flex-col rounded-xl border bg-white">
-        <div className="flex items-center gap-2 border-b px-4 py-3">
-          <a href="/" className="text-sm text-zinc-400 hover:text-zinc-600">← 项目</a>
-          <span className="font-medium">{project?.name ?? "…"}</span>
+      {/* 答案栏 */}
+      <div className="flex min-w-0 flex-1 flex-col border-r border-line">
+        <div className="flex flex-none items-center gap-2.5 border-b border-line bg-panel px-[30px] py-3">
+          <a href="/" className="text-xs text-faint hover:text-ink">
+            ← 项目
+          </a>
+          <a
+            href={`/projects/${projectId}`}
+            className="text-[13px] font-medium hover:text-accent"
+          >
+            {project?.name ?? "…"}
+          </a>
+          <a
+            href={`/projects/${projectId}`}
+            className="text-[10px] tracking-wide text-faint hover:text-accent"
+          >
+            详情 →
+          </a>
           {project && project.status !== "ready" && (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
-              项目未就绪（{project.status}），暂不能提问
+            <span className="border border-danger/40 px-2 py-[2px] text-[10px] tracking-wide text-danger">
+              {project.status.toUpperCase()} · 暂不能提问
             </span>
           )}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[30px] py-[26px]">
           {messages.length === 0 && (
-            <div className="pt-16 text-center text-sm text-zinc-400">
+            <div className="pt-16 text-center text-xs text-faint">
               问点什么吧，比如「create_order 函数在哪，是干嘛的？」
             </div>
           )}
-          {messages.map((m, i) => (
-            <div key={i} className={m.role === "user" ? "flex justify-end" : ""}>
-              <div
-                className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
-                  m.role === "user" ? "bg-zinc-900 text-white" : "bg-zinc-50 border"
-                }`}
-              >
-                {m.role === "assistant" ? (
-                  <div className="prose prose-sm prose-zinc max-w-none [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-900 [&_pre]:p-3 [&_pre]:text-zinc-100">
-                    <ReactMarkdown>{m.content || (m.streaming ? "思考中…" : "")}</ReactMarkdown>
-                    {m.citations.length > 0 && <CitationList citations={m.citations} />}
-                  </div>
-                ) : (
-                  <span className="whitespace-pre-wrap">{m.content}</span>
-                )}
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[76%] whitespace-pre-wrap bg-ink px-3.5 py-2.5 text-[13px] leading-relaxed text-paper">
+                  {m.content}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={i} className="flex flex-col gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="block h-4 w-4 bg-accent" />
+                  <span className="text-[10px] tracking-label text-dim">
+                    ANSWER
+                    {m.citations.length > 0 ? ` · 命中 ${m.citations.length} 个代码块` : ""}
+                  </span>
+                </div>
+                <div
+                  onClick={() => setSelected(i)}
+                  className={`cursor-default border bg-panel px-5 py-[18px] text-[13px] leading-[1.95] ${
+                    sourceIndex === i ? "border-line" : "border-hair"
+                  }`}
+                >
+                  <div className="prose prose-sm max-w-none prose-p:my-0 prose-p:mb-3 prose-p:last:mb-0 prose-code:bg-accent/[.08] prose-code:px-1 prose-code:py-px prose-code:text-accent prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-none prose-pre:border prose-pre:border-line prose-pre:bg-shade prose-pre:text-ink2">
+                    <ReactMarkdown>{m.content || (m.streaming ? "思考中…" : "")}</ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            )
+          )}
           <div ref={bottomRef} />
         </div>
 
         {error && (
-          <div className="mx-4 mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mx-[30px] mb-2 border-l-2 border-danger bg-danger/[.06] px-3 py-2 text-xs text-danger">
             {error}
           </div>
         )}
 
-        <div className="border-t p-3">
-          <div className="flex gap-2">
+        <div className="flex-none border-t border-line px-[30px] pb-5 pt-4">
+          <div className="flex flex-col gap-3 border border-line bg-panel px-3.5 py-3">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -196,43 +242,71 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 }
               }}
               rows={2}
-              placeholder="询问这个项目的代码…（Enter 发送，Shift+Enter 换行）"
-              className="flex-1 resize-none rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
+              placeholder="询问这个项目的代码…"
+              className="w-full resize-none border-0 bg-transparent p-0 text-[13px] placeholder:text-faint focus:outline-none"
             />
-            <button
-              onClick={send}
-              disabled={busy || project?.status !== "ready"}
-              className="self-end rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-            >
-              发送
-            </button>
+            <div className="flex items-center gap-2.5">
+              <span className="text-[10px] tracking-wide text-faint">
+                ENTER 发送 · SHIFT+ENTER 换行
+              </span>
+              <button
+                onClick={send}
+                disabled={busy || project?.status !== "ready"}
+                className="ml-auto bg-ink px-4 py-[7px] text-[11px] font-medium tracking-wide text-paper disabled:opacity-40"
+              >
+                发送
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function CitationList({ citations }: { citations: Citation[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mt-3 border-t pt-2 not-prose">
-      <button
-        onClick={() => setOpen(!open)}
-        className="text-xs text-zinc-500 hover:text-zinc-700"
-      >
-        {open ? "▾" : "▸"} 引用来源（{citations.length}）
-      </button>
-      {open && (
-        <div className="mt-2 space-y-1">
+      {/* 源码栏 */}
+      <aside className="hidden w-[472px] flex-none flex-col bg-canvas lg:flex">
+        <div className="flex flex-none items-center gap-2.5 border-b border-line px-[18px] py-3.5">
+          <span className="text-[10px] tracking-label text-dim">SOURCES · {citations.length}</span>
+          <span className="ml-auto text-[10px] tracking-wide text-faint">SORT BY SCORE</span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
+          {citations.length === 0 && (
+            <div className="pt-12 text-center text-[11px] text-faint">
+              回答产生的引用会出现在这里
+            </div>
+          )}
           {citations.map((c, i) => (
-            <div key={i} className="rounded-lg bg-white border px-3 py-1.5 text-xs font-mono text-zinc-600">
-              {c.file_path}:{c.start_line}-{c.end_line}
-              <span className="ml-2 text-zinc-400">{c.symbol}</span>
+            <div
+              key={`${c.node_id}-${i}`}
+              className={`bg-panel ${i === 0 ? "border border-accent/40" : "border border-line"}`}
+            >
+              <div className="flex items-center gap-2.5 border-b border-hair px-3 py-2.5">
+                <span
+                  className={`flex h-4 w-4 items-center justify-center text-[10px] ${
+                    i === 0 ? "bg-accent text-paper" : "bg-hair text-ink2"
+                  }`}
+                >
+                  {i + 1}
+                </span>
+                <span className="truncate text-[11.5px]">
+                  {c.file_path}
+                  <span className="text-dim">
+                    :{c.start_line}-{c.end_line}
+                  </span>
+                </span>
+              </div>
+              <div className="flex gap-2 px-3 py-2 text-[10px] tracking-wide text-dim">
+                <span className="truncate">{c.symbol || "—"}</span>
+                {/* 设计稿这里链到 /map?node=…，该路由 M3 未实现；改指详情页「功能地图」页签 */}
+                <a
+                  href={`/projects/${projectId}?tab=modules`}
+                  className="ml-auto whitespace-nowrap text-accent hover:underline"
+                >
+                  功能地图 →
+                </a>
+              </div>
             </div>
           ))}
         </div>
-      )}
+      </aside>
     </div>
   );
 }

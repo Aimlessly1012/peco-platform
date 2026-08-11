@@ -112,7 +112,9 @@ async def ask(session_id: uuid.UUID, payload: AskRequest):
                         yield {"event": "token", "data": json.dumps({"t": token})}
                 elif kind == "on_chain_end" and event.get("name") == "retrieve":
                     items = event["data"]["output"].get("items") or []
-                    citations = [c.citation() for c in items if c.via_edge is None]
+                    # 必须与提示词里的「资料 N」编号同序同长：答案中的 [n] 上标按下标定位，
+                    # 过滤掉关联带出项会让编号整体错位（关联项由 via_edge 字段区分展示）
+                    citations = [c.citation() for c in items]
             yield {"event": "citations", "data": json.dumps(citations)}
 
             answer = "".join(answer_parts)

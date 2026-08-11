@@ -33,5 +33,14 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = 1500
     max_file_bytes: int = 1_000_000
 
+    # MCP（M3）：DNS 重绑定防护白名单。MCP 无鉴权，必须限制 Host/Origin，
+    # 否则浏览器里的恶意页面可直接读取本地代码库。默认放行本机与 compose 内部服务名。
+    mcp_allowed_hosts: list[str] = [
+        "127.0.0.1:*", "localhost:*", "[::1]:*", "backend:*",
+    ]
+    mcp_allowed_origins: list[str] = [
+        "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*",
+    ]
+
 
 settings = Settings()
