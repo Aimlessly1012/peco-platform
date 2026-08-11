@@ -1,7 +1,7 @@
 # indexing-pipeline Specification
 
 ## Purpose
-索引管道能力：按 clone → parse → summarize → embed → graph 阶段将 Git 仓库代码拉取、AST 分块（含路由解析、模块归属与依赖边提取）、四层摘要生成、上下文增强嵌入并写入 Neo4j 图谱，含文件过滤、全量重建语义与任务阶段推进统计。
+索引管道能力：按 clone → parse → summarize → embed → graph → report 阶段将 Git 仓库代码拉取、AST 分块（含路由解析、模块归属与依赖边提取）、四层摘要生成、上下文增强嵌入、写入 Neo4j 图谱并生成理解报告，含文件过滤、全量重建语义与任务阶段推进统计。
 
 ## Requirements
 
@@ -68,7 +68,7 @@ M1 的重新索引 SHALL 为全量重建：先删除 Neo4j 中该 project_id 的
 - **THEN** 完成后 Neo4j 中不存在已删除文件对应的 File/Chunk 节点
 
 ### Requirement: 任务阶段推进与统计
-索引任务 SHALL 按 clone → parse → summarize → embed → graph 顺序推进并实时更新 stage/progress/stats；每阶段完成即持久化，任务成功后项目状态置 ready。stats SHALL 额外记录模块数、摘要新调用数与缓存命中数、CALLS_API 边数与 warning 数。
+索引任务 SHALL 按 clone → parse → summarize → embed → graph → report 顺序推进并实时更新 stage/progress/stats；每阶段完成即持久化，任务成功后项目状态置 ready。stats SHALL 额外记录模块数、摘要新调用数与缓存命中数、CALLS_API 边数与 warning 数，以及报告生成情况（时序图成功/降级数）。
 
 #### Scenario: 阶段推进可观测
 - **WHEN** 任务从 parse 进入 summarize
@@ -77,6 +77,10 @@ M1 的重新索引 SHALL 为全量重建：先删除 Neo4j 中该 project_id 的
 #### Scenario: 理解层统计可见
 - **WHEN** 索引成功完成
 - **THEN** stats 含 modules、summaries_new、summaries_cached、api_edges 等计数
+
+#### Scenario: 报告阶段推进
+- **WHEN** graph 阶段完成
+- **THEN** 任务 stage 变为 report，报告生成完毕后任务 succeeded 且 stats 含 sequences_ok/sequences_fallback 计数
 
 ### Requirement: 路由解析与模块归属
 parse 阶段 SHALL 通过框架探测器链解析路由并划分功能模块：Next.js（pages/ 与 app/ 文件路由）、React Router v6（createBrowserRouter/Route 配置）、Vue Router（routes 配置数组）、FastAPI（路由装饰器 + include_router prefix 拼接）；前后端探测独立进行。文件归属规则：路由入口文件直接归属其模块；非入口文件沿 IMPORTS 边从模块入口 BFS 归属最近可达模块（等距可多归属）；不可达文件归 `shared` 模块。所有框架探测失败时 SHALL 降级为按顶层目录分组（kind=dir），任务 stats 标记 `router_fallback: true`，管道继续。
