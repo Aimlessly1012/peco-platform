@@ -37,3 +37,25 @@ def fake_embedder(monkeypatch):
     monkeypatch.setattr(type(embedder_module.embedder), "embed_texts", embed_texts)
     monkeypatch.setattr(type(embedder_module.embedder), "embed_query", embed_query)
     return embedder_module.embedder
+
+
+@pytest.fixture
+def fake_summarizer(monkeypatch):
+    """确定性假摘要：文本含路径/模块名关键词，使词袋假向量可命中摘要层。"""
+    from app.services.ingest import summarizer as sm
+
+    async def summarize_file(self, path, imports, chunks, head):
+        symbols = " ".join(c.symbol for c in chunks[:5])
+        return f"负责 {path} 的实现，包含 {symbols}"
+
+    async def summarize_module(self, name, kind, prefix, entries, file_summaries):
+        return f"{name} 模块（{kind}）：负责 {name} 相关业务流程，入口 {prefix}"
+
+    async def summarize_project(self, readme, module_map, module_summaries):
+        names = ", ".join(module_summaries)
+        return f"Mini Shop 全栈演示项目，功能模块：{names}"
+
+    monkeypatch.setattr(type(sm.summarizer), "summarize_file", summarize_file)
+    monkeypatch.setattr(type(sm.summarizer), "summarize_module", summarize_module)
+    monkeypatch.setattr(type(sm.summarizer), "summarize_project", summarize_project)
+    return sm.summarizer

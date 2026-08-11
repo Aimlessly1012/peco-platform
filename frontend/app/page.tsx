@@ -13,6 +13,7 @@ const STATUS_BADGE: Record<Project["status"], { label: string; cls: string }> = 
 const STAGE_LABEL: Record<IndexJob["stage"], string> = {
   clone: "拉取代码",
   parse: "解析分块",
+  summarize: "生成摘要",
   embed: "向量化",
   graph: "写入图谱",
 };

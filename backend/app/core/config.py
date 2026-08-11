@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     chat_api_key: str = ""
     chat_model: str = "qwen3.7-plus"
 
+    summary_model: str = ""  # 摘要用模型，空则复用 chat_model
+    summary_concurrency: int = 4
+
     secret_key: str = "dev-secret-key"
     repos_dir: Path = Path("./data/repos")
 

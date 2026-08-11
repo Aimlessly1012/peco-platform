@@ -103,13 +103,16 @@ async def ask(session_id: uuid.UUID, payload: AskRequest):
             ):
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
+                    # 只转发 generate 节点（tags=answer）的流，rewrite/classify 不进答案
+                    if "answer" not in (event.get("tags") or []):
+                        continue
                     token = event["data"]["chunk"].content
                     if token:
                         answer_parts.append(token)
                         yield {"event": "token", "data": json.dumps({"t": token})}
                 elif kind == "on_chain_end" and event.get("name") == "retrieve":
-                    chunks = event["data"]["output"].get("chunks") or []
-                    citations = [c.citation() for c in chunks]
+                    items = event["data"]["output"].get("items") or []
+                    citations = [c.citation() for c in items if c.via_edge is None]
             yield {"event": "citations", "data": json.dumps(citations)}
 
             answer = "".join(answer_parts)

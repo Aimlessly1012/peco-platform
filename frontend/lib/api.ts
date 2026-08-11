@@ -17,7 +17,7 @@ export interface IndexJob {
   project_id: string;
   kind: string;
   status: "running" | "succeeded" | "failed";
-  stage: "clone" | "parse" | "embed" | "graph";
+  stage: "clone" | "parse" | "summarize" | "embed" | "graph";
   progress: number;
   stats_json: Record<string, number>;
   error_text: string | null;

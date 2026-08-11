@@ -29,6 +29,7 @@ class JobStatus:
 class JobStage:
     CLONE = "clone"
     PARSE = "parse"
+    SUMMARIZE = "summarize"
     EMBED = "embed"
     GRAPH = "graph"
 

@@ -79,6 +79,11 @@ clone 0-10 → parse 10-25（含 IMPORTS/路由解析/归属）→ summarize 25-
 
 无数据迁移：M1 项目重新索引即获得新图结构（全量重建删旧图）。graph_writer 停写 `HAS_FILE` 边，改写 `HAS_MODULE` + `CONTAINS`。新向量索引启动时自动创建。
 
+## 实施修正记录
+
+- **嵌入缓存键**：D4/D5 原定沿用 content_hash（代码 hash）——实施时修正为**嵌入文本 hash（embed_key）**：M2 嵌入文本含模块归属与文件职责，摘要变化必须使向量失效重算；M1 旧数据无 embed_key，首次 M2 重索引自然全量重嵌入，符合迁移语义
+- **模块唯一键**：page:orders 与 api:orders 同名会在归属 BFS 与 Neo4j 节点名上冲突——模块键统一为 `"kind:name"`（Module 节点显示名存 module_name 属性）
+
 ## Open Questions
 
 （无——范围内决策已闭合）
