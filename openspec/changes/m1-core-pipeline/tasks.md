@@ -42,4 +42,4 @@
 - [x] 6.1 构建微型 fixture 全栈仓库（9 文件：Next.js 页面 + fetch 调用 + FastAPI 端点，为 M2 的 CALLS_API 测试预埋素材）
 - [x] 6.2 管道集成测试：对 fixture 跑完整索引（嵌入 mock 为固定假向量），断言 Neo4j File/Chunk 节点数、DEFINES 边数与 stats 一致（已对真实 Neo4j 跑通）
 - [x] 6.3 检索冒烟测试：固定假向量下对 fixture 提出 3 个局部问题，断言检索命中预期文件的块（已跑通，含跨项目隔离断言）
-- [ ] 6.4 手动验收：docker compose up → 录入一个真实私有仓库 → 索引完成 → 聊天问"XX 函数在哪/是干嘛的"得到带 路径:行号 引用的正确回答；README 记录启动与配置步骤（README 已写；API 冒烟已通过：health/创建/token 不回显/列表/删除级联；真实仓库验收需用户填入 DashScope key 后执行 README 验收清单）
+- [x] 6.4 手动验收：docker compose up → 录入一个真实私有仓库 → 索引完成 → 聊天问"XX 函数在哪/是干嘛的"得到带 路径:行号 引用的正确回答；README 记录启动与配置步骤（已验收：真实仓库 tt-ad-agent，110 文件/719 块索引成功，DeepSeek 流式问答带引用，回答对检索不足如实说明）
