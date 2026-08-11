@@ -19,13 +19,18 @@
 - [ ] B9 classify 三分类（global|local|impact，少样本扩充，失败仍回退 local）+ retrieve impact 策略（向量定位目标 → impact_of → 影响树格式化并入资料）；目标定位失败降级 local
 - [ ] B10 MCP impact_analysis 升级：max_depth 参数（默认 2）、分层输出对齐 B8；工具描述更新
 
-## 4. MCP 鉴权与收尾
+## 4. 前端路由探测器扩展（真实反馈：umi 项目全量 fallback）
+
+- [ ] B13 umi 探测器：识别标志（package.json 依赖 umi/@umijs/max 或存在 .umirc.ts）→ 约定式路由（src/pages 文件路由，含 [id]/$id 动态段、_layout 排除）+ 配置式路由（.umirc.ts / config/routes.ts / config/config.ts 的 routes 数组，component '@/pages/..' 解析为入口文件）→ 按路由首段分组产出 kind=page 模块；fixture 单测（约定式与配置式各一）
+- [ ] B14 降级两级化 + 巨模块细分：探测失败时优先页面目录感知分组（src/pages、src/views、app 二级子目录），否则顶层目录；任一模块 >200 文件自动按子目录细分（递归一层）；单测覆盖 src 巨目录场景
+
+## 5. MCP 鉴权与收尾
 
 - [ ] B11 MCP_AUTH_TOKEN：ASGI 中间件拦 /mcp 校验 Bearer（空则跳过），401 结构化错误；/mcp-guide 页在鉴权开启时展示带 header 命令（读后端新增的 GET /mcp-info 或构建时环境变量，取实现简单者）
-- [ ] B12 README 更新（增量语义、mode 参数、超时与鉴权配置）
+- [ ] B12 README 更新（增量语义、mode 参数、超时与鉴权配置、支持的路由框架清单）
 
-## 5. V 组（PM 验收）
+## 6. V 组（PM 验收）
 
 - [ ] V1 全量测试绿 + 容器重建
-- [ ] V2 真实验收：ad.anynovel.app（大仓库）——首次索引完成后改动仓库触发 auto 增量观察秒级/局部行为与连续子进度；聊天问"改 XX 文件影响哪些地方"得到分层回答；MCP impact_analysis(max_depth=3) 实测
+- [ ] V2 真实验收：ad.anynovel.app（umi 大仓库）——mode=full 重索引后 router_fallback=false 且产出按路由分组的 page 模块（不再有 1133 文件巨模块）；随后改动仓库触发 auto 增量观察秒级/局部行为与连续子进度；聊天问"改 XX 文件影响哪些地方"得到分层回答；MCP impact_analysis(max_depth=3) 实测
 - [ ] V3 提交与归档

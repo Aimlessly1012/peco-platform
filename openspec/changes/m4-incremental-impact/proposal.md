@@ -11,6 +11,7 @@
 - **阶段内子进度**：summarize 按已完成文件数、embed 按已完成批次数实时推进 progress（25→55、55→85 区间内连续变化），stats 增加 summarize_done/summarize_total 与 embed_done/embed_total
 - **LLM/嵌入调用显式超时**：单次调用 timeout 可配（默认 60s），超时进入既有退避/降级路径
 - **MCP 可选鉴权**：MCP_AUTH_TOKEN 环境变量，设置后 /mcp 要求 Bearer 匹配；默认为空保持本地免鉴权
+- **前端路由探测器扩展**（真实使用反馈：ad.anynovel.app 为 umi 项目，1151 文件全部降级为目录分组，src "模块" 1133 文件）：新增 umi 探测器（约定式 src/pages 文件路由 + 配置式 .umirc.ts / config/routes.ts）；降级策略两级化——优先按页面目录感知分组（src/pages 等二级目录），仍无则顶层目录；任何模块文件数 >200 自动按子目录细分，避免巨模块
 
 ## Capabilities
 

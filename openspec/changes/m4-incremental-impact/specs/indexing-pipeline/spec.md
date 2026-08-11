@@ -1,5 +1,26 @@
 # indexing-pipeline — 增量重索引与可观测性（M4）
 
+## MODIFIED Requirements
+
+### Requirement: 路由解析与模块归属
+parse 阶段 SHALL 通过框架探测器链解析路由并划分功能模块：Next.js（pages/ 与 app/ 文件路由）、umi（约定式 src/pages 文件路由与配置式 .umirc.ts / config/routes.ts / config/config.ts 路由数组，以 package.json 依赖 umi/@umijs/max 或 .umirc 存在为识别标志）、React Router v6（createBrowserRouter/Route 配置）、Vue Router（routes 配置数组）、FastAPI（路由装饰器 + include_router prefix 拼接）；前后端探测独立进行。文件归属规则：路由入口文件直接归属其模块；非入口文件沿 IMPORTS 边从模块入口 BFS 归属最近可达模块（等距可多归属）；不可达文件归 `shared` 模块。所有框架探测失败时 SHALL 两级降级：优先按页面目录感知分组（存在 src/pages、src/views、app 等页面目录时以其二级子目录为模块），否则按顶层目录分组（kind=dir）；任一模块 CONTAINS 文件数超过 200 时 SHALL 自动按其子目录进一步细分。降级发生时任务 stats 标记 `router_fallback: true`，管道继续。
+
+#### Scenario: 全栈仓库产出两类模块
+- **WHEN** 索引一个 Next.js 前端 + FastAPI 后端的仓库
+- **THEN** 产出 kind=page 的前端页面模块与 kind=api 的后端接口模块，各自的入口文件归属正确
+
+#### Scenario: umi 项目解析出页面模块
+- **WHEN** 索引一个 umi 项目（package.json 含 @umijs/max，src/pages 下有多个页面目录）
+- **THEN** 产出 kind=page 的页面模块（按路由首段分组），router_fallback 为 false
+
+#### Scenario: 未知框架降级
+- **WHEN** 仓库无法被任何路由探测器识别
+- **THEN** 按两级降级策略分组，stats 含 router_fallback=true，索引正常完成
+
+#### Scenario: 巨模块自动细分
+- **WHEN** 任何分组方式产生文件数 >200 的模块
+- **THEN** 该模块按子目录自动细分，最终无单模块超过 200 文件（不可细分的扁平目录除外）
+
 ## REMOVED Requirements
 
 ### Requirement: 全量重建语义（M1）
