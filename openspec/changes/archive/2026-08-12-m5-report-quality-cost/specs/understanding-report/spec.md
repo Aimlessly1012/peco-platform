@@ -28,6 +28,13 @@
 - **WHEN** 某模块时序图两次生成均校验失败
 - **THEN** 该模块记录 fallback_text，其余模块时序图正常，索引任务仍为 succeeded
 
+### Requirement: 报告与模块地图查询 API
+系统 SHALL 提供 `GET /projects/{id}/report`（返回报告四件：doc_markdown、mindmap_mermaid、dataflow_mermaid、sequences，以及 depth 标记；无报告时 404 并附提示语）与 `GET /projects/{id}/modules`（返回模块列表：name/kind/route_prefix/summary 及各模块文件清单与 L2 摘要，数据实时读 Neo4j）。旧报告（无 dataflow_mermaid）字段可为空，客户端 SHALL 兼容。
+
+#### Scenario: 旧项目无报告
+- **WHEN** 项目最后一次索引早于 report 功能上线，查询报告
+- **THEN** 返回 404 与"请重新索引以生成报告"类提示
+
 ### Requirement: 前端项目理解展示
 项目详情页「项目理解」页签 SHALL 展示：需求文档（markdown 渲染 + 源码复制）、**模块级顶层导图**（点击模块节点或模块列表项 SHALL 展开该模块的文件子导图——由前端基于模块地图数据即时拼装渲染，无需后端存储）、**模块数据流图**、各模块时序图（渲染失败显示 fallback_text 或源码块，不得白屏）；每张图提供 mermaid 源码一键复制。fast 模式产物 SHALL 显示"快速模式"标识与「生成深度理解」引导。
 
