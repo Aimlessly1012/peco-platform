@@ -4,7 +4,9 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 用 PyPI 装 uv，不再 COPY --from=ghcr.io（ghcr 在部分网络 TLS 超时，
+# 且 latest 标签每次 build 都要联网查 manifest——正是"build 静默失败"的根因）
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
