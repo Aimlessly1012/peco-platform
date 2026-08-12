@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60
     embedding_timeout_seconds: float = 30
 
+    # 嵌入输入按字符截断上限。text-embedding-v2 单条上限 2048 token，
+    # 中文最坏密度 ~1.5 字符/token → 3000 字符安全；换 8192 上限的模型可调大
+    embedding_max_chars: int = 3000
+
     secret_key: str = "dev-secret-key"
     repos_dir: Path = Path("./data/repos")
 

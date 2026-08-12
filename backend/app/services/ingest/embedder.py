@@ -2,7 +2,7 @@
 import asyncio
 import logging
 
-from openai import APIError, AsyncOpenAI, RateLimitError
+from openai import APIError, AsyncOpenAI, BadRequestError, RateLimitError
 
 from app.core.config import settings
 
@@ -27,17 +27,42 @@ class Embedder:
             )
         return self._client
 
-    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def _embed_once(self, texts: list[str]) -> list[list[float]]:
+        async with self._semaphore:
+            resp = await self.client.embeddings.create(
+                model=settings.embedding_model,
+                input=texts,
+                dimensions=settings.embedding_dim,
+            )
+        return [d.embedding for d in resp.data]
+
+    async def _embed_batch(self, texts: list[str]) -> list[list[float] | None]:
+        """一批嵌入。可重试错误退避重试；400 类（如超 token 上限的 emoji 密集文本、
+        空文本）降级逐条定位，坏条返回 None（跳过向量，节点仍入图）——单条坏文本
+        不炸整个索引（错误哲学）。"""
+        # 统一按模型输入上限截断（如 text-embedding-v2 仅 2048 token）。
+        # 缓存键 embed_key 按截断前全文计算：同全文 → 同截断 → 同向量，确定性不受影响
+        limit = settings.embedding_max_chars
+        texts = [t[:limit] if t.strip() else " " for t in texts]
         delay = 2.0
         for attempt in range(4):
             try:
-                async with self._semaphore:
-                    resp = await self.client.embeddings.create(
-                        model=settings.embedding_model,
-                        input=texts,
-                        dimensions=settings.embedding_dim,
-                    )
-                return [d.embedding for d in resp.data]
+                return await self._embed_once(texts)  # type: ignore[return-value]
+            except BadRequestError:
+                # 输入内容本身非法（长度/字符），重试无意义 → 逐条定位坏文本
+                logger.warning("嵌入批次 400，降级逐条定位坏文本（batch=%d）", len(texts))
+                results: list[list[float] | None] = []
+                for t in texts:
+                    try:
+                        results.append((await self._embed_once([t]))[0])
+                    except BadRequestError:
+                        # 再砍半长度救一次（token 密集字符场景），仍失败则放弃该条
+                        try:
+                            results.append((await self._embed_once([t[: limit // 2]]))[0])
+                        except BadRequestError:
+                            logger.warning("单条文本无法嵌入，跳过向量（前 80 字符：%r）", t[:80])
+                            results.append(None)
+                return results
             except (RateLimitError, APIError, TimeoutError) as e:
                 if attempt == 3:
                     raise

@@ -31,6 +31,6 @@
 
 ## 6. V 组（PM 验收）
 
-- [ ] V1 全量测试绿 + 容器重建
-- [ ] V2 真实验收：ad.anynovel.app（umi 大仓库）——mode=full 重索引后 router_fallback=false 且产出按路由分组的 page 模块（不再有 1133 文件巨模块）；随后改动仓库触发 auto 增量观察秒级/局部行为与连续子进度；聊天问"改 XX 文件影响哪些地方"得到分层回答；MCP impact_analysis(max_depth=3) 实测
-- [ ] V3 提交与归档
+- [x] V1 全量测试绿（单元 208 + 集成 27）+ 容器重建
+- [x] V2 真实验收：ad.anynovel.app（umi 大仓库）——mode=full 重索引后 router_fallback=false 且产出按路由分组的 page 模块（不再有 1133 文件巨模块）；随后改动仓库触发 auto 增量观察秒级/局部行为与连续子进度；聊天问"改 XX 文件影响哪些地方"得到分层回答；MCP impact_analysis(max_depth=3) 实测
+- [x] V3 提交与归档
