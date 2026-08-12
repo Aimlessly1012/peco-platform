@@ -198,7 +198,9 @@ export async function askStream(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    // SSE 规范允许 \r\n 行分隔（sse-starlette 新版默认如此），统一归一为 \n
+    // ——否则 indexOf("\n\n") 永远匹配不到块边界，整场流零事件（"一直思考中"事故）
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
     let idx;
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
       const block = buffer.slice(0, idx);
@@ -206,4 +208,7 @@ export async function askStream(
       if (block.trim()) handleBlock(block);
     }
   }
+  // 流结束后 flush 残余（最后一个块之后可能没有空行）
+  buffer += decoder.decode().replace(/\r\n/g, "\n");
+  if (buffer.trim()) handleBlock(buffer);
 }

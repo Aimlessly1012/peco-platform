@@ -136,4 +136,6 @@ async def ask(session_id: uuid.UUID, payload: AskRequest):
                 "data": json.dumps({"message": f"生成失败：{type(e).__name__}，请重试"}),
             }
 
-    return EventSourceResponse(event_stream())
+    # sep 显式锁定 \n：sse-starlette 新版默认 \r\n，曾使前端按 \n\n 分块的解析
+    # 整场流零事件（前端已同时兼容两种分隔，双保险）
+    return EventSourceResponse(event_stream(), sep="\n")
