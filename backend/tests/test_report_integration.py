@@ -10,12 +10,14 @@ import uuid
 import pytest
 
 from app.graph.client import close_driver, delete_project_graph, ensure_vector_index
+from app.services.ingest.graph_writer import load_feature_cache, save_module_features
 from app.services.report.builder import select_core_modules
 from app.services.report.dataflow import build_dataflow
 from app.services.report.graph_reader import (
     read_file_detail,
     read_graph_edges,
     read_impact,
+    read_module_anchors,
     read_module_edges,
     read_project_stats,
     read_project_tree,
@@ -197,6 +199,73 @@ async def test_dataflow_matches_graph_relations(indexed_project):
     real_names = {m.name for m in tree.modules}
     for label in labels:
         assert label.split("] ", 1)[-1] in real_names, f"图中不存在的模块：{label}"
+
+
+async def test_module_anchors_are_real_paths_and_symbols(indexed_project):
+    """M6: 功能点提取的锚点必须是图里真实的文件路径与函数名（防幻觉的基础）。"""
+    pid, files, modules = indexed_project
+    anchors = await read_module_anchors(pid)
+
+    assert anchors
+    real_paths = {f.path for f in files}
+    for key, lines in anchors.items():
+        assert key in {m.key for m in modules}
+        assert len(lines) <= 15
+        for line in lines:
+            path = line.split("（", 1)[0]
+            assert path in real_paths, f"锚点出现图中不存在的文件：{path}"
+
+    orders = anchors.get("api:orders", [])
+    assert any("backend/routers/orders.py" in line for line in orders)
+    assert any("create_order" in line for line in orders), "api 模块应带上 handler 函数名"
+
+
+async def test_module_tree_carries_agg_hash(indexed_project):
+    """功能点缓存复用 L3 的 agg_hash 键，树里必须读得到。"""
+    pid, _, _ = indexed_project
+    tree = await read_project_tree(pid)
+    assert all(m.agg_hash for m in tree.modules)
+
+
+async def test_feature_cache_round_trip(indexed_project):
+    """M6: LLM 功能点回写 Module 节点后可被下次索引读回；降级产物不入缓存。"""
+    pid, _, _ = indexed_project
+    tree = await read_project_tree(pid)
+    target = next(m for m in tree.modules if m.kind == "api")
+
+    assert await load_feature_cache(pid) == {}
+    written = await save_module_features(pid, {target.agg_hash: ["创建订单", "取消订单"]})
+
+    assert written == 1
+    cache = await load_feature_cache(pid)
+    assert cache[target.agg_hash] == ["创建订单", "取消订单"]
+
+
+async def test_build_report_produces_feature_map(indexed_project):
+    """端到端：deep 报告含功能导图，功能域对应真实 page/api 模块。"""
+    pid, _, _ = indexed_project
+    tree = await read_project_tree(pid)
+    llm = FakeLLM(
+        chapter_returns="### 章节\n正文",
+        seq_returns=[GOOD_SEQ] * 6,
+        feature_returns="- 创建订单\n- 查询订单列表",
+    )
+
+    result = await build_report(pid, llm=llm)
+
+    assert result.feature_map_markdown.startswith("#")
+    assert "## " in result.feature_map_markdown
+    assert "- 创建订单" in result.feature_map_markdown
+    assert result.stats["feature_domains"] > 0
+    # shared 不入功能导图
+    assert "\n## shared" not in result.feature_map_markdown
+    domain_names = {
+        line[3:].split("（", 1)[0]
+        for line in result.feature_map_markdown.splitlines()
+        if line.startswith("## ")
+    }
+    real_names = {m.name for m in tree.modules if m.kind in ("page", "api", "dir")}
+    assert domain_names <= real_names, "功能域必须对应图中真实模块"
 
 
 async def test_fast_report_is_programmatic_only(indexed_project):

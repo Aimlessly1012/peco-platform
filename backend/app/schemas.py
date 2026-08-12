@@ -53,11 +53,13 @@ class SequenceOut(BaseModel):
 
 
 class ReportOut(BaseModel):
-    """理解报告四件（M5）。dataflow_mermaid 为空表示旧报告，前端隐藏该卡片。"""
+    """理解报告（M6）。feature_map_markdown / dataflow_mermaid 为空表示旧报告，
+    前端分别回退渲染结构导图、隐藏数据流卡片。"""
 
     project_id: uuid.UUID
     doc_markdown: str
-    mindmap_mermaid: str
+    feature_map_markdown: str = ""  # 需求功能思维导图（markmap 渲染）
+    mindmap_mermaid: str = ""       # 模块结构导图（功能地图页签）
     dataflow_mermaid: str = ""
     sequences: list[SequenceOut]
     depth: str = "deep"  # fast 报告只有程序化两件，前端据此显示升级引导

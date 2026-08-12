@@ -87,6 +87,50 @@ async def load_embedding_cache(project_id: str) -> dict[str, list[float]]:
         return {rec["h"]: rec["e"] async for rec in result}
 
 
+async def load_feature_cache(project_id: str) -> dict[str, list[str]]:
+    """agg_hash → 功能点（M6）。只复用 LLM 产出的那部分。
+
+    降级（fallback）与 fast 的程序化功能点不入缓存——否则一次失败会被永久固化，
+    重索引也拿不回真正的提取结果（与 L2 摘要的 FAST_PREFIX 排除同理）。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (m:Module {project_id: $pid})
+            WHERE m.agg_hash IS NOT NULL AND m.features IS NOT NULL
+              AND m.features_source = $source
+            RETURN m.agg_hash AS h, m.features AS points
+            """,
+            pid=project_id, source="llm",
+        )
+        return {
+            rec["h"]: list(rec["points"])
+            async for rec in result
+            if rec["h"] and rec["points"]
+        }
+
+
+async def save_module_features(project_id: str, points_by_hash: dict[str, list[str]]) -> int:
+    """把 LLM 提取的功能点回写到 Module 节点（按 agg_hash 匹配），供下次索引复用。"""
+    if not points_by_hash:
+        return 0
+    driver = get_driver()
+    rows = [{"h": h, "points": points} for h, points in points_by_hash.items() if points]
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            UNWIND $rows AS row
+            MATCH (m:Module {project_id: $pid, agg_hash: row.h})
+            SET m.features = row.points, m.features_source = 'llm'
+            RETURN count(m) AS n
+            """,
+            pid=project_id, rows=rows,
+        )
+        record = await result.single()
+        return (record and record["n"]) or 0
+
+
 async def load_project_index_meta(project_id: str) -> dict:
     """读回 Project 节点上记录的嵌入模型（M4 B15）。
 

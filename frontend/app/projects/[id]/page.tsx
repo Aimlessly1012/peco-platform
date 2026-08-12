@@ -27,14 +27,22 @@ import {
 } from "@/lib/labels";
 import { isMockMode, MOCK_JOBS, MOCK_MODULES, MOCK_REPORT } from "@/lib/mock";
 
+const diagramLoading = (label: string) => () => (
+  <div className="border border-line bg-panel px-4 py-10 text-center text-[11px] tracking-wide text-faint">
+    {label}
+  </div>
+);
+
 /** mermaid 体积大且强依赖浏览器 API：仅在客户端动态加载（关闭 SSR）。 */
 const MermaidDiagram = dynamic(() => import("@/components/MermaidDiagram"), {
   ssr: false,
-  loading: () => (
-    <div className="border border-line bg-panel px-4 py-10 text-center text-[11px] tracking-wide text-faint">
-      LOADING DIAGRAM…
-    </div>
-  ),
+  loading: diagramLoading("LOADING DIAGRAM…"),
+});
+
+/** markmap 同理（markmap-lib + markmap-view + d3，只在需要时进包）。 */
+const MarkmapView = dynamic(() => import("@/components/MarkmapView"), {
+  ssr: false,
+  loading: diagramLoading("LOADING FEATURE MAP…"),
 });
 
 const TABS = [
@@ -44,6 +52,8 @@ const TABS = [
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
+
+type ReportState = "loading" | "ok" | "empty" | "error";
 
 const TAB_KEYS = TABS.map((t) => t.key) as readonly string[];
 
@@ -69,6 +79,10 @@ export default function ProjectDetailPage({
   /** 模块地图提到父组件：功能地图页签与项目理解页签的子导图共用同一份数据。 */
   const [modules, setModules] = useState<ModuleInfo[] | null>(null);
   const [modulesError, setModulesError] = useState("");
+  /** 报告同样提到父组件：M6 后结构导图归功能地图页签，两个页签都要读它。 */
+  const [report, setReport] = useState<UnderstandingReport | null>(null);
+  const [reportState, setReportState] = useState<ReportState>("loading");
+  const [reportError, setReportError] = useState("");
 
   // 初始页签支持 ?tab=（聊天页 SOURCES 卡片链到 ?tab=modules）
   useEffect(() => {
@@ -133,6 +147,36 @@ export default function ProjectDetailPage({
       })
       .catch((e) => {
         if (!stopped) setModulesError((e as Error).message);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [projectId, mock, reloadKey]);
+
+  useEffect(() => {
+    let stopped = false;
+    if (mock) {
+      setReport(MOCK_REPORT);
+      setReportState("ok");
+      return;
+    }
+    setReportState("loading");
+    setReportError("");
+    api<UnderstandingReport>(`/projects/${projectId}/report`)
+      .then((r) => {
+        if (stopped) return;
+        setReport(r);
+        setReportState("ok");
+      })
+      .catch((e) => {
+        if (stopped) return;
+        if (isNotFound(e)) {
+          setReport(null);
+          setReportState("empty");
+        } else {
+          setReportError((e as Error).message);
+          setReportState("error");
+        }
       });
     return () => {
       stopped = true;
@@ -374,17 +418,20 @@ export default function ProjectDetailPage({
         <div className="py-5">
           {tab === "understanding" && (
             <UnderstandingTab
-              projectId={projectId}
-              mock={mock}
-              reloadKey={reloadKey}
+              report={report}
+              state={reportState}
+              error={reportError}
               indexing={!!indexing}
-              modules={modules}
               onReindex={reindex}
               onDeepen={deepen}
             />
           )}
           {tab === "modules" && (
-            <ModulesTab modules={modules} error={modulesError} />
+            <ModulesTab
+              modules={modules}
+              error={modulesError}
+              structureMermaid={report?.mindmap_mermaid ?? ""}
+            />
           )}
           {tab === "jobs" && <JobsTab projectId={projectId} mock={mock} />}
         </div>
@@ -427,54 +474,20 @@ function SectionLabel({ text, extra }: { text: string; extra?: string }) {
  * 外加模块子导图——由已加载的模块地图数据在前端即时拼装，不发额外请求。
  */
 function UnderstandingTab({
-  projectId,
-  mock,
-  reloadKey,
+  report,
+  state,
+  error,
   indexing,
-  modules,
   onReindex,
   onDeepen,
 }: {
-  projectId: string;
-  mock: boolean;
-  reloadKey: number;
+  report: UnderstandingReport | null;
+  state: ReportState;
+  error: string;
   indexing: boolean;
-  modules: ModuleInfo[] | null;
   onReindex: () => void;
   onDeepen: () => void;
 }) {
-  const [report, setReport] = useState<UnderstandingReport | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "empty" | "error">("loading");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let stopped = false;
-    if (mock) {
-      setReport(MOCK_REPORT);
-      setState("ok");
-      return;
-    }
-    setState("loading");
-    api<UnderstandingReport>(`/projects/${projectId}/report`)
-      .then((r) => {
-        if (stopped) return;
-        setReport(r);
-        setState("ok");
-      })
-      .catch((e) => {
-        if (stopped) return;
-        if (isNotFound(e)) {
-          setState("empty");
-        } else {
-          setError((e as Error).message);
-          setState("error");
-        }
-      });
-    return () => {
-      stopped = true;
-    };
-  }, [projectId, mock, reloadKey]);
-
   if (state === "loading") return <Loading text="LOADING REPORT…" />;
   if (state === "error") return <ErrorCard message={error} />;
 
@@ -530,6 +543,29 @@ function UnderstandingTab({
       )}
 
       <section className="flex flex-col gap-2.5">
+        <SectionLabel text="FEATURE MAP 需求功能思维导图" />
+        {report.feature_map_markdown?.trim() ? (
+          <MarkmapView
+            title="需求功能思维导图"
+            subtitle="产品定位 → 功能域 → 功能点，初始展开到功能域层"
+            markdown={report.feature_map_markdown}
+          />
+        ) : (
+          <>
+            <div className="border-l-2 border-line bg-shade px-3 py-2 text-[11px] leading-relaxed text-muted">
+              这份报告生成于功能导图上线之前，下面展示的是旧版结构导图（模块视角）。
+              重新索引即可获取需求功能导图。
+            </div>
+            <MermaidDiagram
+              title="功能思维导图（旧版结构视角）"
+              subtitle="由图谱中的 项目 → 模块 结构程序化生成"
+              code={report.mindmap_mermaid || ""}
+            />
+          </>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2.5">
         <SectionLabel text="REQUIREMENT DOC 需求逻辑文档" />
         <div className="border border-line bg-panel">
           <div className="flex items-center gap-2 border-b border-line bg-shade px-4 py-2.5">
@@ -554,16 +590,6 @@ function UnderstandingTab({
             )}
           </div>
         </div>
-      </section>
-
-      <section className="flex flex-col gap-2.5">
-        <SectionLabel text="MINDMAP 功能思维导图" />
-        <MermaidDiagram
-          title="功能思维导图（模块级）"
-          subtitle="由图谱中的 项目 → 模块 结构程序化生成"
-          code={report.mindmap_mermaid || ""}
-        />
-        <ModuleMindmap modules={modules} />
       </section>
 
       {report.dataflow_mermaid?.trim() && (
@@ -736,9 +762,12 @@ function ModuleMindmap({ modules }: { modules: ModuleInfo[] | null }) {
 function ModulesTab({
   modules,
   error,
+  structureMermaid,
 }: {
   modules: ModuleInfo[] | null;
   error: string;
+  /** M6：结构导图（Project→Module）从项目理解页签移到这里，技术视角归技术页签。 */
+  structureMermaid: string;
 }) {
   if (error) return <ErrorCard message={error} />;
   if (!modules) return <Loading text="LOADING MODULES…" />;
@@ -760,6 +789,22 @@ function ModulesTab({
 
   return (
     <div className="flex flex-col gap-7">
+      <section className="flex flex-col gap-2.5">
+        <SectionLabel text="STRUCTURE 模块结构导图" />
+        {structureMermaid.trim() ? (
+          <MermaidDiagram
+            title="模块结构导图"
+            subtitle="由图谱中的 项目 → 模块 结构程序化生成"
+            code={structureMermaid}
+          />
+        ) : (
+          <div className="border border-dashed border-line py-10 text-center text-[11px] text-faint">
+            尚无结构导图（重新索引后生成）
+          </div>
+        )}
+        <ModuleMindmap modules={modules} />
+      </section>
+
       {groups.map((g) => {
         const meta = moduleKindMeta(g.kind);
         return (

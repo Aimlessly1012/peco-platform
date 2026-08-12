@@ -109,14 +109,31 @@ class FakeLLM:
 
     def __init__(
         self, chapter_returns=None, overview_returns="## 一、系统概述\n\n概述正文",
-        seq_returns=None,
+        seq_returns=None, feature_returns="- 创建订单\n- 查询订单列表\n- 取消订单",
     ):
         self.chapter_returns = chapter_returns
         self.overview_returns = overview_returns
         self.seq_returns = list(seq_returns or [])
+        self.feature_returns = feature_returns
         self.chapter_calls: list[dict] = []
         self.overview_calls: list[tuple] = []
         self.seq_calls: list[dict] = []
+        self.feature_calls: list[dict] = []
+
+    async def generate_features(self, name, kind_label, route_prefix, summary, anchors):
+        self.feature_calls.append(
+            {"name": name, "kind_label": kind_label, "prefix": route_prefix,
+             "summary": summary, "anchors": anchors}
+        )
+        value = self.feature_returns
+        if isinstance(value, dict):          # 按模块名定制返回
+            value = value.get(name)
+        if isinstance(value, list):          # 按调用次序取值（测重试）
+            index = len(self.feature_calls) - 1
+            value = value[index] if index < len(value) else None
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     async def generate_chapters(self, module_blocks, count):
         self.chapter_calls.append({"blocks": module_blocks, "count": count})

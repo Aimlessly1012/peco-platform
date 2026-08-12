@@ -24,6 +24,7 @@ class ModuleNode:
     kind: str                # page | api | dir | shared
     route_prefix: str = ""
     summary: str = ""
+    agg_hash: str = ""       # 模块内文件 hash 聚合（L3 与功能点共用的缓存键）
     files: list[FileNode] = field(default_factory=list)
 
 
@@ -106,6 +107,7 @@ async def read_project_tree(project_id: str) -> ProjectTree:
             WITH m, f ORDER BY f.path
             RETURN m.name AS node_name, m.module_name AS name, m.kind AS kind,
                    m.route_prefix AS prefix, m.summary AS summary,
+                   m.agg_hash AS agg_hash,
                    collect(f {.path, .language, .summary}) AS files
             ORDER BY m.kind, m.module_name
             """,
@@ -128,6 +130,7 @@ async def read_project_tree(project_id: str) -> ProjectTree:
                     kind=rec["kind"] or "",
                     route_prefix=rec["prefix"] or "",
                     summary=rec["summary"] or "",
+                    agg_hash=rec["agg_hash"] or "",
                     files=files,
                 )
             )
@@ -220,6 +223,42 @@ async def read_module_edges(project_id: str) -> list[ModuleEdge]:
         )
         edges.extend([to_edge(rec, "imports") async for rec in result])
     return edges
+
+
+async def read_module_anchors(
+    project_id: str, max_files: int = 15, max_symbols: int = 4
+) -> dict[str, list[str]]:
+    """每个模块的路由锚点清单（M6 D1）：文件路径 + 其顶层函数/方法名。
+
+    这是功能点提取的防幻觉锚——prompt 里给的每一条都来自图，模型只能在此基础上
+    翻译成业务短语，不能凭空造出仓库里没有的能力。
+    """
+    driver = get_driver()
+    anchors: dict[str, list[str]] = {}
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (m:Module {project_id: $pid})-[:CONTAINS]->(f:File)
+            OPTIONAL MATCH (f)-[:DEFINES]->(c:Chunk)
+            WHERE c.symbol_type IN ['function', 'method', 'class']
+            WITH m, f, collect(DISTINCT c.symbol)[0..$max_symbols] AS symbols
+            ORDER BY f.path
+            RETURN m.name AS node_name,
+                   collect({path: f.path, symbols: symbols})[0..$max_files] AS rows
+            """,
+            pid=project_id, max_files=max_files, max_symbols=max_symbols,
+        )
+        async for rec in result:
+            key = _module_key_from_node(rec["node_name"] or "")
+            lines: list[str] = []
+            for row in rec["rows"] or []:
+                path = row.get("path") or ""
+                if not path:
+                    continue
+                symbols = [s for s in (row.get("symbols") or []) if s]
+                lines.append(f"{path}（{', '.join(symbols)}）" if symbols else path)
+            anchors[key] = lines
+    return anchors
 
 
 async def read_file_detail(project_id: str, path: str) -> dict | None:

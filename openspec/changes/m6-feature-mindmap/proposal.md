@@ -8,8 +8,9 @@
 
 - **功能导图生成**（替代现顶层结构导图成为报告主导图）：三层结构 `产品定位 → 功能域 → 功能点`。功能域 = 模块业务名；功能点由**每模块一次 flash 小调用**提取（输入该模块 L3 业务目标/关键流程 + 路由清单，输出 2-6 条中文功能点短语），程序化拼装为 **Markdown 层级文本**（markmap 原生输入，无语法校验负担）。按模块 agg_hash 缓存；单模块提取失败降级为路由段清单；fast 模式纯程序化（模块业务名 + 路由段）
 - **前端 markmap 渲染**：新增 markmap 组件（横向逻辑图、节点折叠/展开、缩放平移——XMind 式交互），项目理解页签主导图换用之；markdown 源码一键复制（可直接粘贴进 XMind/Obsidian 使用）
-- **结构视角保留不丢**：原模块结构导图（Project→Module）与文件子导图移入「功能地图」页签（技术视角归技术页签），报告页签专注需求视角
-- 报告存储：understanding_reports 新增 feature_map_markdown 列；旧报告该字段为空时前端回退展示原 mindmap_mermaid
+- **新增业务流程图**（用户追加：流程图也要需求方向）：从 L4 核心业务流 + 相关功能域 L3 关键流程生成 2-4 张业务流程 flowchart（节点为用户动作/系统行为的业务步骤，≤8 节点/张），复用 mermaid 校验-重试-文字降级链路；fast 模式跳过
+- **报告页签定位敲定为纯需求视角**：原模块结构导图（Project→Module）、文件子导图与**模块数据流图**（代码向）全部移入「功能地图」页签；代码调用链细节不再追求画图——由聊天问答（分层检索+影响面）承接
+- 报告存储：understanding_reports 新增 feature_map_markdown 列与 business_flows_json 列（[{title, mermaid, fallback_text}]）；旧报告字段为空时前端回退/隐藏
 
 ## Capabilities
 

@@ -132,6 +132,7 @@ async def get_report(
     return ReportOut(
         project_id=report.project_id,
         doc_markdown=report.doc_markdown,
+        feature_map_markdown=report.feature_map_markdown or "",
         mindmap_mermaid=report.mindmap_mermaid,
         dataflow_mermaid=report.dataflow_mermaid or "",
         sequences=report.sequences_json or [],

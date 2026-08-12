@@ -106,6 +106,9 @@ class UnderstandingReport(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), unique=True
     )
     doc_markdown: Mapped[str] = mapped_column(Text, default="")
+    # M6：需求功能思维导图（markdown 层级文本，markmap 直接渲染）。旧报告为 NULL
+    feature_map_markdown: Mapped[str | None] = mapped_column(Text, default=None)
+    # M5：模块结构导图（Project→Module），M6 起归功能地图页签使用
     mindmap_mermaid: Mapped[str] = mapped_column(Text, default="")
     # M5：模块数据流图。旧报告为 NULL，前端据此隐藏卡片
     dataflow_mermaid: Mapped[str | None] = mapped_column(Text, default=None)

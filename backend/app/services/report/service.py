@@ -2,6 +2,7 @@
 
 错误哲学：report 阶段任何失败都不阻塞索引成功，只把任务标 partial（spec）。
 """
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -11,10 +12,13 @@ from sqlalchemy import select
 
 from app.core.db import SessionLocal
 from app.models.tables import IndexDepth, UnderstandingReport
+from app.services.ingest.graph_writer import load_feature_cache, save_module_features
 from app.services.report.builder import generate_doc, generate_sequences
 from app.services.report.dataflow import build_dataflow
+from app.services.report.features import generate_feature_map
 from app.services.report.graph_reader import (
     read_graph_edges,
+    read_module_anchors,
     read_module_edges,
     read_project_tree,
 )
@@ -27,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ReportResult:
     doc_markdown: str = ""
+    feature_map_markdown: str = ""
     mindmap_mermaid: str = ""
     dataflow_mermaid: str = ""
     sequences: list[dict] = field(default_factory=list)
@@ -47,10 +52,15 @@ async def build_report(
     mindmap = build_mindmap(tree)
     module_edges = await read_module_edges(project_id)
     dataflow = build_dataflow(tree, module_edges)
+    anchors = await read_module_anchors(project_id)
 
     if depth == IndexDepth.FAST:
+        feature_map, _, feature_stats = await generate_feature_map(
+            tree, anchors, llm, cache=None, fast=True
+        )
         return ReportResult(
             doc_markdown="",
+            feature_map_markdown=feature_map,
             mindmap_mermaid=mindmap,
             dataflow_mermaid=dataflow,
             sequences=[],
@@ -61,15 +71,23 @@ async def build_report(
                 "doc_fallback": False,
                 "sequences_ok": 0,
                 "sequences_fallback": 0,
+                **feature_stats,
             },
         )
 
     edges = await read_graph_edges(project_id)
-    doc, doc_fallback = await generate_doc(tree, llm)
+    feature_cache = await load_feature_cache(project_id)
+    # 文档分批与功能点提取都是"每个单元一次小调用"，并发跑（M6 B4）
+    (doc, doc_fallback), (feature_map, cacheable, feature_stats) = await asyncio.gather(
+        generate_doc(tree, llm),
+        generate_feature_map(tree, anchors, llm, cache=feature_cache),
+    )
+    await save_module_features(project_id, cacheable)
     sequences, ok, fallback = await generate_sequences(tree, edges, llm)
 
     return ReportResult(
         doc_markdown=doc,
+        feature_map_markdown=feature_map,
         mindmap_mermaid=mindmap,
         dataflow_mermaid=dataflow,
         sequences=sequences,
@@ -80,6 +98,7 @@ async def build_report(
             "doc_fallback": doc_fallback,
             "sequences_ok": ok,
             "sequences_fallback": fallback,
+            **feature_stats,
         },
     )
 
@@ -96,6 +115,7 @@ async def upsert_report(project_id: uuid.UUID, result: ReportResult) -> None:
             report = UnderstandingReport(project_id=project_id)
             session.add(report)
         report.doc_markdown = result.doc_markdown
+        report.feature_map_markdown = result.feature_map_markdown
         report.mindmap_mermaid = result.mindmap_mermaid
         report.dataflow_mermaid = result.dataflow_mermaid
         report.sequences_json = result.sequences

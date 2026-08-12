@@ -1,7 +1,11 @@
 """报告生成的 LLM 客户端（复用 summarizer 的客户端/重试模式，设计 D1）。
 
-需求逻辑文档：单次调用；时序图：每模块一次调用 + 校验失败重试 1 次。
+需求逻辑文档：分批调用；时序图与功能点：每模块一次调用 + 失败重试。
 任何失败返回 None，由调用方降级，绝不抛到管道。
+
+max_tokens 说明：对推理型模型（如 deepseek-v4-flash）这是"推理 + 正文"的总预算，
+给紧了会拿到 finish_reason=length 且 content 为空。各处预算已按实测的推理开销放宽，
+按实际用量计费，放宽不增加成本。
 """
 import asyncio
 import logging
@@ -47,6 +51,28 @@ OVERVIEW_PROMPT = """你是资深软件架构师。基于以下信息写《需�
 
 已生成的模块章节标题：
 {chapter_titles}"""
+
+FEATURE_PROMPT = """你是资深产品经理。下面是某个软件模块的静态分析结果，请提炼这个模块\
+**对用户提供了哪些功能**，用于画产品功能思维导图。
+
+严格要求（不满足会被判为无效）：
+1. 只输出功能点，每行一条，以「- 」开头，不要标题、不要解释、不要空行
+2. 输出 2-6 条，每条不超过 14 个字
+3. 每条必须是中文动宾短语（动词开头），例如「创建广告任务」「导出结算报表」
+4. 禁止出现技术词：组件、接口、文件、模块、函数、类、路由、API、CRUD、封装、渲染
+5. 只能依据下面给出的信息提炼，禁止编造清单中不存在的能力
+6. 入口清单里的技术辅助项（类型定义、请求封装、工具函数、卡片/弹窗等 UI 零件）\
+不要单独成条，把它们服务的那个业务功能写出来即可
+7. 至少输出 1 条。信息少就少写几条，宁少勿编；但不要输出空内容
+
+模块名称：{name}
+模块类型：{kind_label}
+{prefix_line}
+模块职责摘要：
+{summary}
+
+该模块的实际入口清单（文件路径与其中的函数名）：
+{anchors}"""
 
 SEQ_PROMPT = """你是资深软件架构师。基于以下功能模块的静态分析数据，画出该模块核心流程的 mermaid 时序图。
 
@@ -110,6 +136,10 @@ class ReportLLM:
                 text = (resp.choices[0].message.content or "").strip()
                 if text:
                     return text
+                # 空内容多半是 max_tokens 被推理过程吃光——静默重试会让人以为没调用过
+                logger.warning(
+                    "报告 LLM 返回空内容（第 %d 次，max_tokens=%d）", attempt + 1, max_tokens
+                )
             except (RateLimitError, APIError, TimeoutError) as e:
                 logger.warning("报告 LLM 调用失败（%s），%.0fs 后重试", type(e).__name__, delay)
                 if attempt < 2:
@@ -127,7 +157,7 @@ class ReportLLM:
             prefix_hint="，路由 <前缀>",
             module_blocks=module_blocks[:8000],
         )
-        return await self._complete(prompt, max_tokens=2500)
+        return await self._complete(prompt, max_tokens=5000)
 
     async def generate_overview(
         self, overview: str, module_lines: str, chapter_titles: str
@@ -138,7 +168,23 @@ class ReportLLM:
             module_lines=module_lines[:3000] or "（无模块）",
             chapter_titles=chapter_titles[:2000] or "（无章节）",
         )
-        return await self._complete(prompt, max_tokens=1200)
+        return await self._complete(prompt, max_tokens=2500)
+
+    async def generate_features(
+        self, name: str, kind_label: str, route_prefix: str, summary: str, anchors: str
+    ) -> str | None:
+        """单模块功能点提取（M6 D1）：输入小、可缓存、失败只影响该功能域。"""
+        prompt = FEATURE_PROMPT.format(
+            name=name,
+            kind_label=kind_label,
+            prefix_line=f"访问路径前缀：{route_prefix}" if route_prefix else "",
+            summary=summary[:800] or "（无摘要）",
+            anchors=anchors[:1500] or "（无入口清单）",
+        )
+        # 输出本身只有几十 token，但 max_tokens 是"推理 + 正文"的总预算。
+        # 信息越模糊模型纠结越久（实测 800 全被 reasoning 吃光、content 为空），
+        # 预算按实际用量计费，给宽不增加成本
+        return await self._complete(prompt, max_tokens=2000)
 
     async def generate_sequence(
         self,
@@ -164,7 +210,9 @@ class ReportLLM:
             api_lines=api_lines[:2000] or "（无已知前后端调用）",
             import_lines=import_lines[:1500] or "（无已知依赖）",
         )
-        return await self._complete(prompt, max_tokens=1200)
+        # 时序图正文本身就要 300-500 token，1200 的总预算会被推理吃光后交出空内容，
+        # 校验必然失败并降级——M5 现场"时序图 3/6 降级"的真实根因
+        return await self._complete(prompt, max_tokens=3000)
 
 
 report_llm = ReportLLM()

@@ -58,6 +58,11 @@ export interface SequenceDiagram {
 export interface UnderstandingReport {
   doc_markdown: string;
   mindmap_mermaid: string;
+  /**
+   * M6 新增：需求功能思维导图的 markdown 层级文本（# 项目 → ## 功能域 → - 功能点），
+   * 由 markmap 渲染。旧报告为 null，前端回退渲染 mindmap_mermaid。
+   */
+  feature_map_markdown?: string | null;
   /** M5 新增：模块间数据流 flowchart。旧报告为空/缺省，前端隐藏该卡片。 */
   dataflow_mermaid?: string | null;
   /** M5 新增：产出该报告的索引深度。缺省按 deep 处理。 */

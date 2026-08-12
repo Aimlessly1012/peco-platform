@@ -37,9 +37,28 @@ def stub_graph(monkeypatch):
     async def fake_module_edges(project_id: str):
         return state["module_edges"]
 
+    async def fake_anchors(project_id: str, **kwargs):
+        return state["anchors"]
+
+    async def fake_feature_cache(project_id: str):
+        return dict(state["feature_cache"])
+
+    async def fake_save_features(project_id: str, points_by_hash: dict):
+        state["saved_features"] = points_by_hash
+        return len(points_by_hash)
+
+    state["anchors"] = {
+        "api:orders": ["backend/routers/orders.py（create_order, list_orders）"],
+        "page:orders": ["frontend/pages/orders.tsx（OrdersPage）"],
+    }
+    state["feature_cache"] = {}
+    state["saved_features"] = {}
     monkeypatch.setattr("app.services.report.service.read_project_tree", fake_tree)
     monkeypatch.setattr("app.services.report.service.read_graph_edges", fake_edges)
     monkeypatch.setattr("app.services.report.service.read_module_edges", fake_module_edges)
+    monkeypatch.setattr("app.services.report.service.read_module_anchors", fake_anchors)
+    monkeypatch.setattr("app.services.report.service.load_feature_cache", fake_feature_cache)
+    monkeypatch.setattr("app.services.report.service.save_module_features", fake_save_features)
     return state
 
 

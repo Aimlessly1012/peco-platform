@@ -8,6 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "mermaid": "^11.16.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
