@@ -221,18 +221,29 @@ def stub_graph(monkeypatch):
             "modules": ["api:orders"],
         },
         "impact": {
-            "imported_by": [{"file_path": "backend/main.py", "summary": "应用入口"}],
-            "api_callers": [
+            "target": "backend/routers/orders.py",
+            "resolved_files": ["backend/routers/orders.py"],
+            "max_depth": 2,
+            "direct": [
+                {"file_path": "backend/main.py", "summary": "应用入口",
+                 "depth": 1, "via_path": ["backend/main.py", "backend/routers/orders.py"]},
+            ],
+            "transitive": [
+                {"file_path": "backend/cli.py", "summary": "命令行入口", "depth": 2,
+                 "via_path": ["backend/cli.py", "backend/main.py", "backend/routers/orders.py"]},
+            ],
+            "frontend_callers": [
                 {
                     "file_path": "frontend/pages/orders.tsx", "symbol": "OrdersPage",
-                    "lines": "5-30", "calls_handler": "create_order",
+                    "lines": "5-30", "calls": "backend/routers/orders.py:create_order",
                 }
             ],
             "modules_affected": [
-                {"name": "orders", "kind": "api", "route_prefix": "/api/orders"}
+                {"name": "orders", "kind": "api", "route_prefix": "/api/orders",
+                 "affected_files": 3}
             ],
+            "truncated": False,
         },
-        "symbol_files": ["backend/routers/orders.py"],
         "search": [
             RetrievedItem(
                 kind="chunk", node_id="n1", file_path="backend/routers/orders.py",
@@ -260,20 +271,18 @@ def stub_graph(monkeypatch):
         detail = state["file_detail"]
         return detail if detail and detail["path"] == path else None
 
-    async def fake_impact(pid: str, path: str):
-        return state["impact"]
-
-    async def fake_symbol_files(pid: str, symbol: str):
-        return state["symbol_files"]
+    async def fake_impact(pid: str, file_or_symbol: str, max_depth: int = 2):
+        state["impact_calls"].append({"target": file_or_symbol, "max_depth": max_depth})
+        return {**state["impact"], "target": file_or_symbol}
 
     async def fake_search(pid: str, query: str, question_type: str = "local", top_k=None):
         return state["search"]
 
+    state["impact_calls"] = []
     monkeypatch.setattr("app.mcp_server.server.read_project_tree", fake_tree)
     monkeypatch.setattr("app.mcp_server.server.read_project_stats", fake_stats)
     monkeypatch.setattr("app.mcp_server.server.read_file_detail", fake_file_detail)
-    monkeypatch.setattr("app.mcp_server.server.read_impact", fake_impact)
-    monkeypatch.setattr("app.mcp_server.server.resolve_symbol_files", fake_symbol_files)
+    monkeypatch.setattr("app.mcp_server.server.impact_of", fake_impact)
     monkeypatch.setattr("app.mcp_server.server.search_layered", fake_search)
     return state
 
@@ -411,8 +420,8 @@ async def test_get_file_summary_missing_file(mcp_session, test_db, stub_graph):
     assert "hint" in out
 
 
-async def test_impact_analysis_by_path(mcp_session, test_db, stub_graph):
-    """spec 场景: 返回 import 它的文件、经 CALLS_API 调它的前端块及所属模块。"""
+async def test_impact_analysis_layered_output(mcp_session, test_db, stub_graph):
+    """spec 场景: 返回 direct/transitive 分层（transitive 带 depth 与路径）、前端调用方与波及模块。"""
     await _add_project(test_db)
     out = await mcp_session.call_tool(
         "impact_analysis",
@@ -420,23 +429,41 @@ async def test_impact_analysis_by_path(mcp_session, test_db, stub_graph):
     )
 
     assert out["resolved_files"] == ["backend/routers/orders.py"]
-    assert out["imported_by"][0]["file_path"] == "backend/main.py"
-    assert out["api_callers"][0]["file_path"] == "frontend/pages/orders.tsx"
-    assert out["api_callers"][0]["calls_handler"] == "create_order"
+    assert out["direct"][0]["file_path"] == "backend/main.py"
+    assert out["transitive"][0]["depth"] == 2
+    assert out["transitive"][0]["via_path"][0] == "backend/cli.py"
+    assert out["frontend_callers"][0]["file_path"] == "frontend/pages/orders.tsx"
     assert out["modules_affected"][0]["name"] == "orders"
+    assert out["truncated"] is False
+
+
+async def test_impact_analysis_default_and_custom_depth(mcp_session, test_db, stub_graph):
+    await _add_project(test_db)
+    await mcp_session.call_tool(
+        "impact_analysis", {"project": "mini-shop", "file_or_symbol": "a.py"}
+    )
+    await mcp_session.call_tool(
+        "impact_analysis",
+        {"project": "mini-shop", "file_or_symbol": "a.py", "max_depth": 3},
+    )
+
+    assert stub_graph["impact_calls"][0]["max_depth"] == 2   # 默认 2
+    assert stub_graph["impact_calls"][1]["max_depth"] == 3
 
 
 async def test_impact_analysis_by_symbol(mcp_session, test_db, stub_graph):
+    """符号名由检索层反查定义文件，工具层只透传。"""
     await _add_project(test_db)
     out = await mcp_session.call_tool(
         "impact_analysis", {"project": "mini-shop", "file_or_symbol": "create_order"}
     )
     assert out["resolved_files"] == ["backend/routers/orders.py"]
+    assert stub_graph["impact_calls"][-1]["target"] == "create_order"
 
 
 async def test_impact_analysis_unknown_target(mcp_session, test_db, stub_graph):
     await _add_project(test_db)
-    stub_graph["symbol_files"] = []
+    stub_graph["impact"] = {**stub_graph["impact"], "resolved_files": []}
     out = await mcp_session.call_tool(
         "impact_analysis", {"project": "mini-shop", "file_or_symbol": "nope"}
     )

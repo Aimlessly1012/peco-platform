@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     summary_model: str = ""  # 摘要用模型，空则复用 chat_model
     summary_concurrency: int = 4
 
+    # M4 D7：单次模型调用超时。不设时 SDK 默认 600s，一次挂起就能让整个阶段静止十分钟
+    llm_timeout_seconds: float = 60
+    embedding_timeout_seconds: float = 30
+
     secret_key: str = "dev-secret-key"
     repos_dir: Path = Path("./data/repos")
 
@@ -41,6 +45,8 @@ class Settings(BaseSettings):
     mcp_allowed_origins: list[str] = [
         "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*",
     ]
+    # M4 D7：非空时 /mcp 需要 Authorization: Bearer <token>。默认空 = 本地免鉴权
+    mcp_auth_token: str = ""
 
 
 settings = Settings()

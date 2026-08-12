@@ -23,6 +23,7 @@ class Embedder:
             self._client = AsyncOpenAI(
                 base_url=settings.embedding_base_url,
                 api_key=settings.embedding_api_key,
+                timeout=settings.embedding_timeout_seconds,  # M4 D7：超时进入既有退避
             )
         return self._client
 
@@ -45,12 +46,32 @@ class Embedder:
                 delay *= 2
         raise RuntimeError("unreachable")
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """按批大小切分并发嵌入，保持输入顺序。"""
+    async def embed_texts(self, texts: list[str], on_progress=None) -> list[list[float]]:
+        """按批大小切分并发嵌入，保持输入顺序。
+
+        on_progress(done, total) 在每批完成时回调（批数口径，M4 D6 子进度）。
+        """
         batch_size = settings.embedding_batch_size
         batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
-        results = await asyncio.gather(*(self._embed_batch(b) for b in batches))
-        return [vec for batch in results for vec in batch]
+        if on_progress is None:
+            results = await asyncio.gather(*(self._embed_batch(b) for b in batches))
+            return [vec for batch in results for vec in batch]
+
+        total = len(batches)
+        done = 0
+
+        async def run(index: int, batch: list[str]):
+            nonlocal done
+            vectors = await self._embed_batch(batch)
+            done += 1
+            await on_progress(done, total)
+            return index, vectors
+
+        completed = await asyncio.gather(
+            *(run(i, b) for i, b in enumerate(batches))
+        )
+        ordered = [vectors for _, vectors in sorted(completed, key=lambda x: x[0])]
+        return [vec for batch in ordered for vec in batch]
 
     async def embed_query(self, text: str) -> list[float]:
         return (await self._embed_batch([text]))[0]

@@ -75,3 +75,53 @@ async def delete_project_graph(project_id: str) -> None:
         await session.run(
             "MATCH (n {project_id: $pid}) DETACH DELETE n", pid=project_id
         )
+
+
+async def delete_files_subgraph(project_id: str, paths: list[str]) -> int:
+    """删除指定文件的 File 节点及其 DEFINES 的 Chunk（增量：删除/改名/修改的文件）。
+
+    返回删除的节点数。DETACH DELETE 会同时清掉这些节点的所有入边
+    （别处指向它们的 IMPORTS/CONTAINS/CALLS_API），这也是结构边必须全量重连的原因。
+    """
+    if not paths:
+        return 0
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (f:File {project_id: $pid}) WHERE f.path IN $paths
+            OPTIONAL MATCH (f)-[:DEFINES]->(c:Chunk)
+            WITH collect(DISTINCT f) + collect(DISTINCT c) AS nodes
+            UNWIND nodes AS n
+            DETACH DELETE n
+            RETURN count(n) AS deleted
+            """,
+            pid=project_id, paths=paths,
+        )
+        record = await result.single()
+        return (record and record["deleted"]) or 0
+
+
+async def delete_modules_and_structural_edges(project_id: str) -> None:
+    """增量前置：删掉全部 Module 节点与残留的 IMPORTS/CALLS_API 边。
+
+    Module 节点整体重建（模块划分是全局计算，可能增删改），DETACH DELETE 顺带清掉
+    HAS_MODULE/CONTAINS；DEFINES 不动（File→自身 Chunk，非全局计算，未变更文件要复用）。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        await session.run(
+            "MATCH (m:Module {project_id: $pid}) DETACH DELETE m", pid=project_id
+        )
+        await session.run(
+            """
+            MATCH ()-[r:IMPORTS]->() WHERE r.project_id = $pid DELETE r
+            """,
+            pid=project_id,
+        )
+        await session.run(
+            """
+            MATCH ()-[r:CALLS_API]->() WHERE r.project_id = $pid DELETE r
+            """,
+            pid=project_id,
+        )

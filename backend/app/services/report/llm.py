@@ -74,7 +74,9 @@ class ReportLLM:
             raise RuntimeError("未配置 CHAT_API_KEY，无法生成理解报告")
         if self._client is None:
             self._client = AsyncOpenAI(
-                base_url=settings.chat_base_url, api_key=settings.chat_api_key
+                base_url=settings.chat_base_url,
+                api_key=settings.chat_api_key,
+                timeout=settings.llm_timeout_seconds,  # M4 D7
             )
         return self._client
 

@@ -2,7 +2,7 @@
 import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,7 @@ from app.schemas import (
     ProjectOut,
     ReportOut,
 )
-from app.services.ingest.pipeline import start_index_job
+from app.services.ingest.pipeline import MODE_AUTO, VALID_MODES, start_index_job
 from app.services.report.graph_reader import read_project_tree
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -76,10 +76,18 @@ async def delete_project(
 
 @router.post("/{project_id}/index", response_model=IndexJobOut, status_code=202)
 async def trigger_index(
-    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    project_id: uuid.UUID,
+    mode: str = Query(
+        MODE_AUTO,
+        description="auto=有基准 commit 时增量（默认），full=强制全量重建",
+    ),
+    session: AsyncSession = Depends(get_session),
 ):
+    """M4：默认 auto（可增量）。实际执行路径由管道判定并写回任务 kind。"""
+    if mode not in VALID_MODES:
+        raise HTTPException(422, f"mode 仅支持 {' / '.join(VALID_MODES)}")
     await _get_project_or_404(project_id, session)
-    job = await start_index_job(project_id)
+    job = await start_index_job(project_id, mode)
     if job is None:
         raise HTTPException(409, "该项目已有索引任务在运行")
     return job

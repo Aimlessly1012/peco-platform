@@ -14,8 +14,11 @@ from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
 from app.services.retrieval.service import (
+    MAX_IMPACT_DEPTH,
     RetrievedItem,
+    format_impact_context,
     get_project_summary,
+    impact_of,
     search_layered,
 )
 
@@ -36,7 +39,9 @@ SYSTEM_PROMPT = """你是代码仓库问答助手。基于给出的项目资料�
    开头的【项目总览】是背景信息、没有编号，不要为它编造编号
 3. 提到具体代码时同时给出出处，格式：`文件路径:起始行`；引用摘要时标注模块或文件名
 4. 资料不足以回答时如实说明，并给出已看到的相关线索
-5. 用中文回答，代码保持原文"""
+5. 给出【影响面分析】资料时，按「直接引用 / 间接影响（注明跳数）/ 波及的前端与模块」分层回答，
+   每层列出具体文件路径；没有引用者时明确说明"未发现其他文件引用它"
+6. 用中文回答，代码保持原文"""
 
 REWRITE_PROMPT = """根据对话历史，把用户的最新问题改写成一个不依赖上下文、可独立理解的完整问题。只输出改写后的问题本身，不要解释。
 
@@ -45,15 +50,20 @@ REWRITE_PROMPT = """根据对话历史，把用户的最新问题改写成一个
 
 最新问题：{question}"""
 
-CLASSIFY_PROMPT = """判断以下关于代码项目的问题属于哪一类，只输出一个词（global 或 local）：
+CLASSIFY_PROMPT = """判断以下关于代码项目的问题属于哪一类，只输出一个词（global、local 或 impact）：
 - global：关于项目整体的——架构、技术栈、入口、整体流程、模块划分、"这个项目是干嘛的"
 - local：关于具体代码的——某个函数/类/文件在哪、怎么实现、某段逻辑、某个接口的细节
+- impact：关于改动波及范围的——改/删/重构某个文件或函数会影响什么、谁依赖它、动了它要回归测哪些地方
 
 例子：
 "这个项目的整体架构是什么" → global
 "create_order 函数在哪" → local
 "登录流程怎么实现的" → global
 "这个报错是哪里抛的" → local
+"改 order_service.py 会影响哪些地方" → impact
+"删掉这个工具函数有风险吗" → impact
+"谁在依赖 auth 中间件" → impact
+"重构 UserCard 组件要动哪些文件" → impact
 
 问题：{question}"""
 
@@ -109,7 +119,13 @@ async def classify_node(state: QAState) -> QAState:
             config={"tags": ["internal"]},
         )
         answer = (resp.content or "").strip().lower()
-        qtype = "global" if "global" in answer else "local"
+        # impact 先判：影响面问题往往也含 global/local 字样
+        if "impact" in answer:
+            qtype = "impact"
+        elif "global" in answer:
+            qtype = "global"
+        else:
+            qtype = "local"
     except Exception:  # noqa: BLE001 — spec: 分类失败安全回退 local
         logger.warning("classify 失败，回退 local", exc_info=True)
         qtype = "local"
@@ -129,10 +145,32 @@ def _format_item(i: int, item: RetrievedItem) -> str:
     )
 
 
+async def _impact_context(project_id: str, question: str, items: list[RetrievedItem]) -> str:
+    """影响面资料块（M4 D5）：向量命中的最优块所在文件为起点，做多跳反查。
+
+    定位不到目标文件时返回空串——调用方据此退化为普通 local 回答（spec: 降级不报错）。
+    """
+    target = next((i.file_path for i in items if i.kind == "chunk" and i.file_path), "")
+    if not target:
+        target = next((i.file_path for i in items if i.file_path), "")
+    if not target:
+        logger.info("影响面问题未定位到目标文件，降级为 local 检索")
+        return ""
+    try:
+        impact = await impact_of(project_id, target, max_depth=MAX_IMPACT_DEPTH)
+    except Exception:  # noqa: BLE001 — 影响面失败不该让问答挂掉
+        logger.warning("影响面查询失败，降级为 local 检索", exc_info=True)
+        return ""
+    return format_impact_context(impact)
+
+
 async def retrieve_node(state: QAState) -> QAState:
     question = state.get("rewritten_question") or state["question"]
     qtype = state.get("question_type", "local")
-    items = await search_layered(state["project_id"], question, qtype)
+    # impact 的目标定位与常规回答都需要局部检索结果，故检索策略同 local
+    items = await search_layered(
+        state["project_id"], question, "local" if qtype == "impact" else qtype
+    )
 
     parts = [_format_item(i + 1, item) for i, item in enumerate(items)]
     project_summary = ""
@@ -141,6 +179,11 @@ async def retrieve_node(state: QAState) -> QAState:
         if project_summary:
             # 不给编号：它不在 items 里，没有对应的 citation 条目，标题里写明避免模型误编号
             parts.insert(0, f"### 【项目总览】（背景信息，无编号，不要标注）\n{project_summary}")
+    if qtype == "impact":
+        impact_text = await _impact_context(state["project_id"], question, items)
+        if impact_text:
+            # 同样不编号：影响树不是 items 里的条目，编号会挤掉 citations 的对应关系
+            parts.insert(0, f"### 【影响面分析】（背景信息，无编号，不要标注）\n{impact_text}")
     return {
         "items": items,
         "context_text": "\n\n".join(parts),

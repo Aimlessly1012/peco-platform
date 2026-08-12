@@ -31,7 +31,11 @@ def fake_embed(text: str) -> list[float]:
 def fake_embedder(monkeypatch):
     from app.services.ingest import embedder as embedder_module
 
-    async def embed_texts(self, texts):
+    async def embed_texts(self, texts, on_progress=None):
+        if on_progress is not None:  # 与真实签名一致（M4 子进度）
+            total = max(1, math.ceil(len(texts) / settings.embedding_batch_size))
+            for done in range(1, total + 1):
+                await on_progress(done, total)
         return [fake_embed(t) for t in texts]
 
     async def embed_query(self, text):

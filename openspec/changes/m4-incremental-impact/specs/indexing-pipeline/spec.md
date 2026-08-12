@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 路由解析与模块归属
-parse 阶段 SHALL 通过框架探测器链解析路由并划分功能模块：Next.js（pages/ 与 app/ 文件路由）、umi（约定式 src/pages 文件路由与配置式 .umirc.ts / config/routes.ts / config/config.ts 路由数组，以 package.json 依赖 umi/@umijs/max 或 .umirc 存在为识别标志）、React Router v6（createBrowserRouter/Route 配置）、Vue Router（routes 配置数组）、FastAPI（路由装饰器 + include_router prefix 拼接）；前后端探测独立进行。文件归属规则：路由入口文件直接归属其模块；非入口文件沿 IMPORTS 边从模块入口 BFS 归属最近可达模块（等距可多归属）；不可达文件归 `shared` 模块。所有框架探测失败时 SHALL 两级降级：优先按页面目录感知分组（存在 src/pages、src/views、app 等页面目录时以其二级子目录为模块），否则按顶层目录分组（kind=dir）；任一模块 CONTAINS 文件数超过 200 时 SHALL 自动按其子目录进一步细分。降级发生时任务 stats 标记 `router_fallback: true`，管道继续。
+parse 阶段 SHALL 通过框架探测器链解析路由并划分功能模块：Next.js（pages/ 与 app/ 文件路由）、umi（约定式 src/pages 文件路由与配置式 .umirc.ts / config/routes.ts / config/config.ts 路由数组，以 package.json 依赖 umi/@umijs/max 或 .umirc 存在为识别标志）、React Router v6（createBrowserRouter/Route 配置）、FastAPI（路由装饰器 + include_router prefix 拼接）；前后端探测独立进行。Vue Router 明确不在支持范围（Vue 项目不做，未知框架统一走两级降级）。文件归属规则：路由入口文件直接归属其模块；非入口文件沿 IMPORTS 边从模块入口 BFS 归属最近可达模块（等距可多归属）；不可达文件归 `shared` 模块。所有框架探测失败时 SHALL 两级降级：优先按页面目录感知分组（存在 src/pages、src/views、app 等页面目录时以其二级子目录为模块），否则按顶层目录分组（kind=dir）；任一模块 CONTAINS 文件数超过 200 时 SHALL 自动按其子目录进一步细分。降级发生时任务 stats 标记 `router_fallback: true`，管道继续。
 
 #### Scenario: 全栈仓库产出两类模块
 - **WHEN** 索引一个 Next.js 前端 + FastAPI 后端的仓库

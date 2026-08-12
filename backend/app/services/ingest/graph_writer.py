@@ -43,7 +43,8 @@ class FileInfo:
     summary: str = ""
     summary_embedding: list[float] | None = None
     modules: list[str] = field(default_factory=list)
-    imports: list[str] = field(default_factory=list)
+    # None = 从图读回但该节点没有 imports 属性（M4 前的老数据），需现场重提取
+    imports: list[str] | None = field(default_factory=list)
 
 
 @dataclass
@@ -85,6 +86,90 @@ async def load_embedding_cache(project_id: str) -> dict[str, list[float]]:
         return {rec["h"]: rec["e"] async for rec in result}
 
 
+async def load_project_index_meta(project_id: str) -> dict:
+    """读回 Project 节点上记录的嵌入模型（M4 B15）。
+
+    M4 之前写入的节点没有这两个属性，返回空 dict——调用方据此当作"模型未知"强制全量，
+    因为无从判断存量向量出自哪个模型。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (p:Project {project_id: $pid})
+            RETURN p.embedding_model AS model, p.embedding_dim AS dim LIMIT 1
+            """,
+            pid=project_id,
+        )
+        record = await result.single()
+        if record is None:
+            return {}
+        return {"embedding_model": record["model"], "embedding_dim": record["dim"]}
+
+
+async def load_file_metadata(project_id: str) -> dict[str, FileInfo]:
+    """读回图中已有的 File 节点（增量：未变更文件不再读盘解析 AST，设计 D1）。
+
+    imports 属性是 M4 起新增的缓存；老数据缺失时返回 None，由调用方现场重提取。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (f:File {project_id: $pid})
+            RETURN f.path AS path, f.language AS language, f.content_hash AS hash,
+                   f.summary AS summary, f.imports AS imports
+            """,
+            pid=project_id,
+        )
+        loaded: dict[str, FileInfo] = {}
+        async for rec in result:
+            path = rec["path"]
+            if not path:
+                continue
+            info = FileInfo(
+                path=path,
+                language=rec["language"] or "",
+                content_hash=rec["hash"] or "",
+                summary=rec["summary"] or "",
+            )
+            # None = 老数据无该属性（需重提取）；[] = 确实没有 import
+            info.imports = list(rec["imports"]) if rec["imports"] is not None else None
+            loaded[path] = info
+        return loaded
+
+
+async def load_chunk_metadata(project_id: str, paths: set[str]) -> list[CodeChunk]:
+    """读回指定文件的 Chunk（增量：CALLS_API 全局重算需要未变更文件的代码文本）。"""
+    if not paths:
+        return []
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (c:Chunk {project_id: $pid}) WHERE c.file_path IN $paths
+            RETURN c.file_path AS file_path, c.language AS language, c.symbol AS symbol,
+                   c.symbol_type AS symbol_type, c.start_line AS start_line,
+                   c.end_line AS end_line, c.code AS code, c.content_hash AS content_hash
+            ORDER BY c.file_path, c.start_line
+            """,
+            pid=project_id, paths=list(paths),
+        )
+        return [
+            CodeChunk(
+                file_path=rec["file_path"] or "",
+                language=rec["language"] or "",
+                symbol=rec["symbol"] or "",
+                symbol_type=rec["symbol_type"] or "",
+                start_line=rec["start_line"] or 0,
+                end_line=rec["end_line"] or 0,
+                code=rec["code"] or "",
+                content_hash=rec["content_hash"] or "",
+            )
+            async for rec in result
+        ]
+
+
 async def load_summary_cache(project_id: str) -> tuple[dict[str, str], dict[str, str]]:
     """(file content_hash → L2 摘要, module agg_hash → L3 摘要)——M2 摘要缓存预读。"""
     driver = get_driver()
@@ -120,9 +205,15 @@ def _write_sync(
     embeddings: dict[str, list[float]],
     api_edges: list[ApiEdge],
     embed_keys: dict[str, str] | None = None,
+    edge_files: list[FileInfo] | None = None,
+    edge_chunks: list[CodeChunk] | None = None,
 ) -> None:
     store = get_store()
     embed_keys = embed_keys or {}
+    # 增量时节点集是变更文件、边集是全项目：未变更文件不重写节点，但仍要参与
+    # CONTAINS/IMPORTS/CALLS_API 的重连（设计 D1：结构边全量重连）
+    all_files = edge_files if edge_files is not None else files
+    all_chunks = edge_chunks if edge_chunks is not None else chunks
 
     project_node = EntityNode(
         name=project_id,
@@ -132,6 +223,10 @@ def _write_sync(
             "display_name": project_name,
             "git_url": git_url,
             "summary": project_summary,
+            # 本次索引所用的嵌入模型：换模型后 auto 必须强制全量，
+            # 否则未变更文件会留着上一个模型的向量（M4 B15）
+            "embedding_model": settings.embedding_model,
+            "embedding_dim": settings.embedding_dim,
         },
     )
     module_nodes = [
@@ -161,6 +256,9 @@ def _write_sync(
                 "language": f.language,
                 "content_hash": f.content_hash,
                 "summary": f.summary,
+                # M4 D1/B3：增量时未变更文件的 imports 从这里读回，不再读盘解析 AST。
+                # IMPORTS 边仍是唯一真相源，本属性只作缓存。
+                "imports": f.imports or [],
             },
         )
         for f in files
@@ -196,14 +294,14 @@ def _write_sync(
     relations: list[Relation] = []
     for m in modules:
         relations.append(rel("HAS_MODULE", project_id, module_node_name(project_id, m.key)))
-    file_paths = {f.path for f in files}
-    for f in files:
+    file_paths = {f.path for f in all_files}
+    for f in all_files:
         for mod_key in f.modules:  # f.modules 存 qualified key
             relations.append(
                 rel("CONTAINS", module_node_name(project_id, mod_key),
                     file_node_name(project_id, f.path))
             )
-        for target in f.imports:
+        for target in f.imports or ():
             if target in file_paths:
                 relations.append(
                     rel("IMPORTS", file_node_name(project_id, f.path),
@@ -211,15 +309,20 @@ def _write_sync(
                 )
     chunk_names = {(c.file_path, c.symbol, c.start_line): chunk_node_name(project_id, c) for c in chunks}
     by_file_symbol: dict[tuple[str, str], str] = {}
-    for c in chunks:
+    for c in all_chunks:
         by_file_symbol.setdefault((c.file_path, c.symbol), chunk_node_name(project_id, c))
+    # DEFINES 只对本次写入的节点生成：未变更文件的 DEFINES 边没被删过，重复写是浪费
     for c in chunks:
         relations.append(
             rel("DEFINES", file_node_name(project_id, c.file_path),
                 chunk_names[(c.file_path, c.symbol, c.start_line)])
         )
+    all_chunk_names = {
+        (c.file_path, c.symbol, c.start_line): chunk_node_name(project_id, c)
+        for c in all_chunks
+    }
     for e in api_edges:
-        source = chunk_names.get((e.source_file, e.source_symbol, e.source_start_line)) \
+        source = all_chunk_names.get((e.source_file, e.source_symbol, e.source_start_line)) \
             or by_file_symbol.get((e.source_file, e.source_symbol))
         target = by_file_symbol.get((e.target_file, e.target_symbol))
         if source and target:
@@ -244,9 +347,16 @@ async def write_project_graph(
     embeddings: dict[str, list[float]],
     api_edges: list[ApiEdge],
     embed_keys: dict[str, str] | None = None,
+    edge_files: list[FileInfo] | None = None,
+    edge_chunks: list[CodeChunk] | None = None,
 ) -> None:
-    """同步 store 放线程池执行，避免阻塞事件循环。"""
+    """同步 store 放线程池执行，避免阻塞事件循环。
+
+    edge_files/edge_chunks 为增量模式提供"边的全集"：节点只写变更部分，
+    但 CONTAINS/IMPORTS/CALLS_API 覆盖全项目（设计 D1）。
+    """
     await asyncio.to_thread(
         _write_sync, project_id, project_name, git_url, project_summary,
         modules, files, chunks, context_texts, embeddings, api_edges, embed_keys,
+        edge_files, edge_chunks,
     )

@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
 from app.api.chat import router as chat_router
+from app.api.meta import router as meta_router
 from app.api.projects import router as projects_router
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.graph.client import close_driver, ensure_vector_index
+from app.mcp_server.auth import MCPAuthMiddleware
 from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
 
@@ -63,6 +65,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # /mcp 是 mount 进来的子应用，依赖注入进不去，鉴权只能在 ASGI 层做（M4 D7）
+    app.add_middleware(MCPAuthMiddleware, token=settings.mcp_auth_token, path="/mcp")
+    if settings.mcp_auth_token:
+        logger.info("MCP 鉴权已开启（MCP_AUTH_TOKEN）")
 
     @app.get("/health")
     async def health():
@@ -70,6 +76,7 @@ def create_app() -> FastAPI:
 
     app.include_router(projects_router)
     app.include_router(chat_router)
+    app.include_router(meta_router)
 
     # MCP 挂在根路径、且必须在业务路由之后注册：MCP 子应用内部持有 /mcp 路由，
     # 挂到 /mcp 会变成 /mcp/mcp（挂 /mcp 且子路径设 "/" 则 POST 会吃到 307 重定向）。

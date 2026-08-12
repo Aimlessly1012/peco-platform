@@ -24,7 +24,7 @@ from app.services.ingest.module_mapper import (
     ensure_shared_module,
     module_key,
 )
-from app.services.ingest.pipeline import _hash16, _parse_all, build_embed_text
+from app.services.ingest.pipeline import _parse_all, build_embed_text, embed_cache_key
 from app.services.ingest.router_parser import parse_routes
 from app.services.ingest.summarizer import module_agg_hash
 from app.services.ingest.walker import walk_repo
@@ -79,7 +79,7 @@ async def _index_fixture(project_id: str, fake_embedder, fake_summarizer):
         f = files_by_path.get(c.file_path)
         text = build_embed_text(c, "mini-shop", f.modules if f else ["shared"], "", f.summary if f else "")
         embed_texts[c.content_hash] = text
-        embed_keys[c.content_hash] = _hash16(text)
+        embed_keys[c.content_hash] = embed_cache_key(text)
     unique = list({c.content_hash: c for c in chunks})
     vectors = await fake_embedder.embed_texts([embed_texts[h] for h in unique])
     embeddings = dict(zip(unique, vectors))

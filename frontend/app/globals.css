@@ -1,5 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap");
-
+/* 字体不再走 Google Fonts CDN，改为自托管：见 app/fonts.css + public/fonts/ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

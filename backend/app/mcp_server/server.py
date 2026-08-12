@@ -15,20 +15,17 @@ from app.mcp_server.resolver import error, resolve_project
 from app.models.tables import Project, ProjectStatus, UnderstandingReport
 from app.services.report.graph_reader import (
     read_file_detail,
-    read_impact,
     read_project_stats,
     read_project_tree,
-    resolve_symbol_files,
 )
 from app.services.report.mindmap import build_mindmap
-from app.services.retrieval.service import search_layered
+from app.services.retrieval.service import impact_of, search_layered
 
 logger = logging.getLogger(__name__)
 
 MAX_TOP_K = 20
 SNIPPET_MAX_LINES = 80
 SUMMARY_HEAD_CHARS = 80
-MAX_IMPACT_TARGETS = 3
 
 
 def _truncate_snippet(code: str, max_lines: int = SNIPPET_MAX_LINES) -> str:
@@ -219,10 +216,13 @@ def _create_server():
         return {"resolved_project_id": pid, **detail}
 
     @server.tool()
-    async def impact_analysis(project: str, file_or_symbol: str) -> dict:
-        """改动影响面（一跳反查）：谁 import 了它、哪些前端代码块经 HTTP 调用它、波及哪些模块。
+    async def impact_analysis(
+        project: str, file_or_symbol: str, max_depth: int = 2
+    ) -> dict:
+        """改动影响面（多跳）：谁直接/间接 import 了它、哪些前端块经 HTTP 调它、波及哪些模块。
 
-        file_or_symbol 传文件相对路径或函数/类名（符号会先反查其定义文件）。
+        改代码前先问这个。file_or_symbol 传文件相对路径或函数/类名（符号会先反查定义文件）。
+        max_depth 是反向依赖传播的跳数，默认 2、上限 3；transitive 项会带 depth 与传播路径。
         """
         found, err = await resolve_project(project)
         if err:
@@ -231,37 +231,14 @@ def _create_server():
             return error("参数 file_or_symbol 不能为空")
 
         pid = str(found.id)
-        key = file_or_symbol.strip()
-        targets: list[str] = []
-        if await read_file_detail(pid, key) is not None:
-            targets = [key]
-        else:
-            targets = await resolve_symbol_files(pid, key)
-        if not targets:
+        impact = await impact_of(pid, file_or_symbol.strip(), max_depth=max_depth)
+        if not impact["resolved_files"]:
             return error(
-                f"项目「{found.name}」中找不到文件或符号「{key}」",
+                f"项目「{found.name}」中找不到文件或符号「{file_or_symbol}」",
                 resolved_project_id=pid,
                 hint="可先用 search_code 定位它所在的文件路径",
             )
-
-        imported_by: dict[str, dict] = {}
-        api_callers: dict[tuple, dict] = {}
-        modules: dict[str, dict] = {}
-        for target in targets[:MAX_IMPACT_TARGETS]:
-            impact = await read_impact(pid, target)
-            for row in impact["imported_by"]:
-                imported_by[row["file_path"]] = row
-            for row in impact["api_callers"]:
-                api_callers[(row["file_path"], row["lines"])] = row
-            for row in impact["modules_affected"]:
-                modules[f"{row['kind']}:{row['name']}"] = row
-        return {
-            "resolved_project_id": pid,
-            "resolved_files": targets[:MAX_IMPACT_TARGETS],
-            "imported_by": list(imported_by.values()),
-            "api_callers": list(api_callers.values()),
-            "modules_affected": list(modules.values()),
-        }
+        return {"resolved_project_id": pid, **impact}
 
     @server.tool()
     async def get_project_understanding(project: str) -> dict:

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import TopNav from "@/components/TopNav";
+import "./fonts.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
