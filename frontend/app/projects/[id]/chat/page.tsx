@@ -1,7 +1,13 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
+import PathText, {
+  basename,
+  dirname,
+  looksLikePath,
+  middleEllipsis,
+} from "@/components/PathText";
 import {
   api,
   askStream,
@@ -10,12 +16,83 @@ import {
   Citation,
   Project,
 } from "@/lib/api";
+import { rehypeCitationRefs } from "@/lib/citations";
 
 interface DisplayMessage {
   role: "user" | "assistant";
   content: string;
   citations: Citation[];
   streaming?: boolean;
+}
+
+/** 答案正文：引用上标可点，长路径 inline code 中段省略。 */
+function AnswerBody({
+  content,
+  onCite,
+}: {
+  content: string;
+  onCite: (n: number) => void;
+}) {
+  const components = useMemo<Components>(
+    () => ({
+      sup({ node, className, children, ...rest }) {
+        void node;
+        if (!String(className ?? "").includes("cite-ref")) {
+          return (
+            <sup className={className} {...rest}>
+              {children}
+            </sup>
+          );
+        }
+        const n = Number.parseInt(String(children), 10);
+        return (
+          <button
+            type="button"
+            title={`跳转到右侧第 ${n} 条引用`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (Number.isFinite(n)) onCite(n);
+            }}
+            className="mx-[1px] align-super text-[10px] font-medium text-accent hover:underline"
+          >
+            [{n}]
+          </button>
+        );
+      },
+      code({ node, className, children, ...rest }) {
+        void node;
+        const text = String(children ?? "");
+        // v9 没有 inline 标记：块级代码带 language-* 或含换行，据此区分
+        const isInline = !className && !text.includes("\n");
+        if (isInline && looksLikePath(text)) {
+          return (
+            <code className="bg-accent/[.08] px-1 py-px text-accent">
+              <PathText value={text} />
+            </code>
+          );
+        }
+        return (
+          <code className={className} {...rest}>
+            {children}
+          </code>
+        );
+      },
+    }),
+    [onCite]
+  );
+
+  return (
+    <ReactMarkdown rehypePlugins={[rehypeCitationRefs]} components={components}>
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+/** symbol 常带个括号后缀（`create_order (function)`），拆出来做徽章；拆不动就原样显示。 */
+function splitSymbol(symbol: string): { name: string; kind: string | null } {
+  const s = (symbol || "").trim();
+  const m = s.match(/^(.*\S)\s*[（([]([^）)\]]{1,16})[）)\]]$/);
+  return m ? { name: m[1], kind: m[2] } : { name: s, kind: null };
 }
 
 export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
@@ -29,6 +106,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** 待跳转的引用编号（点上标后置位，等右栏渲染出对应条目再滚动）。 */
+  const [pendingCite, setPendingCite] = useState<number | null>(null);
+  const [citeFlash, setCiteFlash] = useState<number | null>(null);
+  const citeRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     api<Project>(`/projects/${projectId}`).then(setProject).catch(() => {});
@@ -126,7 +207,28 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
     return null;
   }, [selected, messages]);
-  const citations = sourceIndex !== null ? messages[sourceIndex].citations : [];
+
+  const citations = useMemo(
+    () => (sourceIndex !== null ? messages[sourceIndex].citations : []),
+    [sourceIndex, messages]
+  );
+
+  /** 点上标：先把右栏切到该消息，等对应条目渲染出来再滚动高亮。 */
+  const handleCite = useCallback((messageIndex: number, n: number) => {
+    setSelected(messageIndex);
+    setPendingCite(n);
+  }, []);
+
+  useEffect(() => {
+    if (pendingCite === null) return;
+    const el = citeRefs.current[pendingCite - 1];
+    setPendingCite(null);
+    if (!el) return; // 编号超出当前引用数，静默忽略
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setCiteFlash(pendingCite - 1);
+    const timer = setTimeout(() => setCiteFlash(null), 1000);
+    return () => clearTimeout(timer);
+  }, [pendingCite, citations]);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -186,7 +288,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[30px] py-[26px]">
+        <div className="flex min-h-0 flex-1 flex-col gap-[22px] overflow-y-auto px-[30px] pb-4 pt-[26px]">
           {messages.length === 0 && (
             <div className="pt-16 text-center text-xs text-faint">
               问点什么吧，比如「create_order 函数在哪，是干嘛的？」
@@ -215,7 +317,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   }`}
                 >
                   <div className="prose prose-sm max-w-none prose-p:my-0 prose-p:mb-3 prose-p:last:mb-0 prose-code:bg-accent/[.08] prose-code:px-1 prose-code:py-px prose-code:text-accent prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-none prose-pre:border prose-pre:border-line prose-pre:bg-shade prose-pre:text-ink2">
-                    <ReactMarkdown>{m.content || (m.streaming ? "思考中…" : "")}</ReactMarkdown>
+                    <AnswerBody
+                      content={m.content || (m.streaming ? "思考中…" : "")}
+                      onCite={(n) => handleCite(i, n)}
+                    />
                   </div>
                 </div>
               </div>
@@ -230,7 +335,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        <div className="flex-none border-t border-line px-[30px] pb-5 pt-4">
+        <div className="flex-none border-t border-line px-[30px] pb-4 pt-3">
           <div className="flex flex-col gap-3 border border-line bg-panel px-3.5 py-3">
             <textarea
               value={input}
@@ -262,9 +367,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       </div>
 
       {/* 源码栏 */}
-      <aside className="hidden w-[472px] flex-none flex-col bg-canvas lg:flex">
+      <aside className="hidden w-[380px] flex-none flex-col bg-canvas lg:flex xl:w-[472px]">
         <div className="flex flex-none items-center gap-2.5 border-b border-line px-[18px] py-3.5">
-          <span className="text-[10px] tracking-label text-dim">SOURCES · {citations.length}</span>
+          <span className="text-[10px] tracking-label text-dim">
+            SOURCES · {citations.length}
+          </span>
           <span className="ml-auto text-[10px] tracking-wide text-faint">SORT BY SCORE</span>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
@@ -273,38 +380,69 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               回答产生的引用会出现在这里
             </div>
           )}
-          {citations.map((c, i) => (
-            <div
-              key={`${c.node_id}-${i}`}
-              className={`bg-panel ${i === 0 ? "border border-accent/40" : "border border-line"}`}
-            >
-              <div className="flex items-center gap-2.5 border-b border-hair px-3 py-2.5">
-                <span
-                  className={`flex h-4 w-4 items-center justify-center text-[10px] ${
-                    i === 0 ? "bg-accent text-paper" : "bg-hair text-ink2"
-                  }`}
-                >
-                  {i + 1}
-                </span>
-                <span className="truncate text-[11.5px]">
-                  {c.file_path}
-                  <span className="text-dim">
-                    :{c.start_line}-{c.end_line}
+          {citations.map((c, i) => {
+            const dir = dirname(c.file_path);
+            const { name, kind } = splitSymbol(c.symbol);
+            const flash = citeFlash === i;
+            return (
+              <div
+                key={`${c.node_id}-${i}`}
+                ref={(el) => {
+                  citeRefs.current[i] = el;
+                }}
+                className={`group bg-panel transition-shadow ${
+                  flash
+                    ? "border border-accent shadow-[0_0_0_2px_rgba(14,122,69,.25)]"
+                    : i === 0
+                      ? "border border-accent/40"
+                      : "border border-line"
+                }`}
+              >
+                <div className="flex items-start gap-2.5 px-3 py-2.5">
+                  <span
+                    className={`mt-px flex h-4 w-4 flex-none items-center justify-center text-[10px] ${
+                      i === 0 ? "bg-accent text-paper" : "bg-hair text-ink2"
+                    }`}
+                  >
+                    {i + 1}
                   </span>
-                </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-medium" title={c.file_path}>
+                      {basename(c.file_path)}
+                      <span className="font-normal text-dim">
+                        :{c.start_line}-{c.end_line}
+                      </span>
+                    </div>
+                    {dir && (
+                      <div
+                        className="mt-0.5 truncate text-[10px] leading-relaxed text-faint"
+                        title={c.file_path}
+                      >
+                        {middleEllipsis(dir)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 border-t border-hair px-3 py-1.5 text-[10px] tracking-wide text-dim">
+                  {kind && (
+                    <span className="flex-none border border-hair bg-shade px-1.5 py-px text-[9px] text-ink2">
+                      {kind}
+                    </span>
+                  )}
+                  <span className="truncate" title={c.symbol || undefined}>
+                    {name || "—"}
+                  </span>
+                  <a
+                    href={`/projects/${projectId}?tab=modules`}
+                    title="在功能地图中查看所属模块"
+                    className="ml-auto flex-none text-accent opacity-0 transition-opacity hover:underline focus:opacity-100 group-hover:opacity-100"
+                  >
+                    功能地图 →
+                  </a>
+                </div>
               </div>
-              <div className="flex gap-2 px-3 py-2 text-[10px] tracking-wide text-dim">
-                <span className="truncate">{c.symbol || "—"}</span>
-                {/* 设计稿这里链到 /map?node=…，该路由 M3 未实现；改指详情页「功能地图」页签 */}
-                <a
-                  href={`/projects/${projectId}?tab=modules`}
-                  className="ml-auto whitespace-nowrap text-accent hover:underline"
-                >
-                  功能地图 →
-                </a>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
     </div>
