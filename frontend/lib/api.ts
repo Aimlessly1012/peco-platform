@@ -40,6 +40,16 @@ export interface IndexJob {
   finished_at: string | null;
 }
 
+/**
+ * 业务流程图（M6）：需求视角的流程图，一条业务链路一张。
+ * mermaid 为空时用 fallback_text 展示文字版流程。
+ */
+export interface BusinessFlow {
+  title: string;
+  mermaid: string;
+  fallback_text: string;
+}
+
 /** 单个模块的核心流程时序图（后端 sequences_json 元素）。 */
 export interface SequenceDiagram {
   module_key: string;
@@ -63,6 +73,8 @@ export interface UnderstandingReport {
    * 由 markmap 渲染。旧报告为 null，前端回退渲染 mindmap_mermaid。
    */
   feature_map_markdown?: string | null;
+  /** M6 新增：业务流程图列表。旧报告为 null/缺省，前端隐藏该区块。 */
+  business_flows?: BusinessFlow[] | null;
   /** M5 新增：模块间数据流 flowchart。旧报告为空/缺省，前端隐藏该卡片。 */
   dataflow_mermaid?: string | null;
   /** M5 新增：产出该报告的索引深度。缺省按 deep 处理。 */

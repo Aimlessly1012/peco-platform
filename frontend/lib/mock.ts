@@ -30,6 +30,27 @@ export const MOCK_REPORT: UnderstandingReport = {
     "- 调整库存数量",
     "- 下单时扣减库存",
   ].join("\n"),
+  business_flows: [
+    {
+      title: "用户下单流程",
+      mermaid: [
+        "flowchart TD",
+        '  A["用户填写收货信息"] --> B{"库存是否充足"}',
+        '  B -->|"充足"| C["创建订单"]',
+        '  B -->|"不足"| D["提示缺货并返回"]',
+        '  C --> E["扣减库存"]',
+        '  E --> F["展示下单结果"]',
+      ].join("\n"),
+      fallback_text: "填写收货信息 → 校验库存 → 创建订单 → 扣减库存 → 返回订单号",
+    },
+    {
+      // 演示 mermaid 为空时的文字版兜底
+      title: "退款流程（文字版）",
+      mermaid: "",
+      fallback_text:
+        "用户发起退款 → 运营审核 → 审核通过则原路退款并回补库存；驳回则通知用户并记录原因。",
+    },
+  ],
   dataflow_mermaid: [
     "flowchart LR",
     '  checkout["下单页 (page)"]',

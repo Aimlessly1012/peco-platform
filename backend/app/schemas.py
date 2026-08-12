@@ -52,6 +52,14 @@ class SequenceOut(BaseModel):
     fallback_text: str = ""
 
 
+class BusinessFlowOut(BaseModel):
+    """业务流程图（M6）。mermaid 为空表示降级，前端显示 fallback_text。"""
+
+    title: str
+    mermaid: str = ""
+    fallback_text: str = ""
+
+
 class ReportOut(BaseModel):
     """理解报告（M6）。feature_map_markdown / dataflow_mermaid 为空表示旧报告，
     前端分别回退渲染结构导图、隐藏数据流卡片。"""
@@ -59,6 +67,7 @@ class ReportOut(BaseModel):
     project_id: uuid.UUID
     doc_markdown: str
     feature_map_markdown: str = ""  # 需求功能思维导图（markmap 渲染）
+    business_flows: list[BusinessFlowOut] = []  # 业务流程图（需求方向）
     mindmap_mermaid: str = ""       # 模块结构导图（功能地图页签）
     dataflow_mermaid: str = ""
     sequences: list[SequenceOut]

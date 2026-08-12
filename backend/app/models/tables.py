@@ -112,6 +112,8 @@ class UnderstandingReport(Base):
     mindmap_mermaid: Mapped[str] = mapped_column(Text, default="")
     # M5：模块数据流图。旧报告为 NULL，前端据此隐藏卡片
     dataflow_mermaid: Mapped[str | None] = mapped_column(Text, default=None)
+    # M6：业务流程图 [{title, mermaid, fallback_text}]。fast 与旧报告为 NULL
+    business_flows_json: Mapped[list | None] = mapped_column(JSON, default=None)
     sequences_json: Mapped[list] = mapped_column(JSON, default=list)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

@@ -16,6 +16,7 @@ from app.services.ingest.graph_writer import load_feature_cache, save_module_fea
 from app.services.report.builder import generate_doc, generate_sequences
 from app.services.report.dataflow import build_dataflow
 from app.services.report.features import generate_feature_map
+from app.services.report.flows import generate_business_flows
 from app.services.report.graph_reader import (
     read_graph_edges,
     read_module_anchors,
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 class ReportResult:
     doc_markdown: str = ""
     feature_map_markdown: str = ""
+    business_flows: list[dict] = field(default_factory=list)
     mindmap_mermaid: str = ""
     dataflow_mermaid: str = ""
     sequences: list[dict] = field(default_factory=list)
@@ -77,10 +79,15 @@ async def build_report(
 
     edges = await read_graph_edges(project_id)
     feature_cache = await load_feature_cache(project_id)
-    # 文档分批与功能点提取都是"每个单元一次小调用"，并发跑（M6 B4）
-    (doc, doc_fallback), (feature_map, cacheable, feature_stats) = await asyncio.gather(
+    # 文档分批、功能点提取、业务流程图三条都是独立的 LLM 管线，并发跑（M6 B4/B5）
+    (
+        (doc, doc_fallback),
+        (feature_map, cacheable, feature_stats),
+        (business_flows, flow_stats),
+    ) = await asyncio.gather(
         generate_doc(tree, llm),
         generate_feature_map(tree, anchors, llm, cache=feature_cache),
+        generate_business_flows(tree, llm),
     )
     await save_module_features(project_id, cacheable)
     sequences, ok, fallback = await generate_sequences(tree, edges, llm)
@@ -88,6 +95,7 @@ async def build_report(
     return ReportResult(
         doc_markdown=doc,
         feature_map_markdown=feature_map,
+        business_flows=business_flows,
         mindmap_mermaid=mindmap,
         dataflow_mermaid=dataflow,
         sequences=sequences,
@@ -99,6 +107,7 @@ async def build_report(
             "sequences_ok": ok,
             "sequences_fallback": fallback,
             **feature_stats,
+            **flow_stats,
         },
     )
 
@@ -116,6 +125,7 @@ async def upsert_report(project_id: uuid.UUID, result: ReportResult) -> None:
             session.add(report)
         report.doc_markdown = result.doc_markdown
         report.feature_map_markdown = result.feature_map_markdown
+        report.business_flows_json = result.business_flows
         report.mindmap_mermaid = result.mindmap_mermaid
         report.dataflow_mermaid = result.dataflow_mermaid
         report.sequences_json = result.sequences

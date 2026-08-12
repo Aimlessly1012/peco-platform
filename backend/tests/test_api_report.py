@@ -39,6 +39,11 @@ async def _make_project(test_db, *, with_report=False) -> uuid.UUID:
                     mindmap_mermaid="mindmap\n  root((mini-shop))",
                     dataflow_mermaid='flowchart LR\n    n0["[接口] orders"]',
                     feature_map_markdown="# mini-shop：订单管理系统\n\n## orders\n- 创建订单\n",
+                    business_flows_json=[
+                        {"title": "下单流程",
+                         "mermaid": "flowchart TD\n    A[下单] --> B[支付]",
+                         "fallback_text": ""}
+                    ],
                     sequences_json=SEQUENCES,
                     generated_at=datetime.now(timezone.utc),
                 )
@@ -70,6 +75,8 @@ async def test_get_report_returns_four_artifacts(api_client, test_db):
     assert body["mindmap_mermaid"].startswith("mindmap")
     assert body["feature_map_markdown"].startswith("# mini-shop：")
     assert "## orders" in body["feature_map_markdown"]
+    assert body["business_flows"][0]["title"] == "下单流程"
+    assert body["business_flows"][0]["mermaid"].startswith("flowchart TD")
     assert body["dataflow_mermaid"].startswith("flowchart LR")
     assert body["depth"] == "deep"
     assert len(body["sequences"]) == 2
@@ -101,8 +108,9 @@ async def test_legacy_report_without_dataflow(api_client, test_db):
 
     body = (await api_client.get(f"/projects/{pid}/report")).json()
     assert body["dataflow_mermaid"] == ""
-    # M6 迁移: 旧报告没有功能导图，前端据此回退渲染 mindmap_mermaid
+    # M6 迁移: 旧报告没有功能导图与业务流程图，前端回退渲染 mindmap_mermaid
     assert body["feature_map_markdown"] == ""
+    assert body["business_flows"] == []
     assert body["mindmap_mermaid"].startswith("mindmap")
     assert body["depth"] == "deep"
 

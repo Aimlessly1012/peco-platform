@@ -148,15 +148,21 @@ def domain_titles(domains: list[ModuleNode]) -> dict[str, str]:
 
 
 def project_tagline(tree: ProjectTree) -> str:
-    """产品定位一句：取 L4 总览里的「项目定位」行，取不到就用首句。"""
+    """产品定位一句：取 L4 总览里的「项目定位」行，取不到就用首句。
+
+    L4 为降级/失败占位（含"生成失败"或以「（」开头的占位串）时不上标题——
+    根节点串进 "（项目总览生成失败）模块列表：page:xxx" 这类技术残片非常难看。
+    """
     summary = (tree.summary or "").strip()
-    if not summary:
+    if not summary or "生成失败" in summary[:20]:
         return "代码仓库功能概览"
     for line in summary.splitlines():
         line = line.strip()
         if line.startswith("项目定位"):
             return line.split("：", 1)[-1].split(":", 1)[-1].strip() or line
     first = re.split(r"[。\n]", summary)[0].strip()
+    if "生成失败" in first or first.startswith("（"):
+        return "代码仓库功能概览"
     return first[:60] or "代码仓库功能概览"
 
 

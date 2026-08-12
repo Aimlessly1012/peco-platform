@@ -87,6 +87,8 @@ export default function MarkmapView({
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<MarkmapInstance | null>(null);
   const rootRef = useRef<PureNode | null>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [state, setState] = useState<ViewState>("loading");
   const [message, setMessage] = useState("");
   const source = (markdown || "").trim();
@@ -125,6 +127,22 @@ export default function MarkmapView({
         );
         mmRef.current = mm;
         if (!cancelled) setState("ok");
+        // 初始 fit 的时机没有可靠信号：setData/renderData 的 promise 依赖 d3
+        // transition end，实测可能永不 resolve；rAF 又早于内容 bbox 就绪。
+        // fit 幂等且无副作用，直接在渲染动画（duration 200ms）后定时补两次
+        const timers = [
+          setTimeout(() => mm.fit().catch(() => {}), 400),
+          setTimeout(() => mm.fit().catch(() => {}), 1200),
+        ];
+        timersRef.current = timers;
+        // 窗口/容器尺寸变化时自动重新适配（observe 会立即触发一次，正好兜底）
+        if (svgRef.current && typeof ResizeObserver !== "undefined") {
+          const ro = new ResizeObserver(() => {
+            mm.fit().catch(() => {});
+          });
+          ro.observe(svgRef.current);
+          roRef.current = ro;
+        }
       } catch (e) {
         if (!cancelled) {
           setMessage(e instanceof Error ? e.message : String(e));
@@ -135,6 +153,10 @@ export default function MarkmapView({
 
     return () => {
       cancelled = true;
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current = [];
+      roRef.current?.disconnect();
+      roRef.current = null;
       try {
         mmRef.current?.destroy();
       } catch {

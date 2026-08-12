@@ -431,6 +431,7 @@ export default function ProjectDetailPage({
               modules={modules}
               error={modulesError}
               structureMermaid={report?.mindmap_mermaid ?? ""}
+              dataflowMermaid={report?.dataflow_mermaid ?? ""}
             />
           )}
           {tab === "jobs" && <JobsTab projectId={projectId} mock={mock} />}
@@ -565,6 +566,26 @@ function UnderstandingTab({
         )}
       </section>
 
+      {report.business_flows?.length ? (
+        <section className="flex flex-col gap-2.5">
+          <SectionLabel
+            text="BUSINESS FLOWS 业务流程图"
+            extra={String(report.business_flows.length)}
+          />
+          <div className="flex flex-col gap-3">
+            {report.business_flows.map((f, i) => (
+              <MermaidDiagram
+                key={`${f.title || "flow"}-${i}`}
+                title={f.title || `业务流程 ${i + 1}`}
+                subtitle="需求视角的业务链路"
+                code={f.mermaid || ""}
+                fallbackText={f.fallback_text}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="flex flex-col gap-2.5">
         <SectionLabel text="REQUIREMENT DOC 需求逻辑文档" />
         <div className="border border-line bg-panel">
@@ -591,17 +612,6 @@ function UnderstandingTab({
           </div>
         </div>
       </section>
-
-      {report.dataflow_mermaid?.trim() && (
-        <section className="flex flex-col gap-2.5">
-          <SectionLabel text="DATAFLOW 模块数据流图" />
-          <MermaidDiagram
-            title="模块数据流图"
-            subtitle="模块间接口调用（实线）与跨模块引用（虚线）聚合，边标注为调用次数"
-            code={report.dataflow_mermaid}
-          />
-        </section>
-      )}
 
       <section className="flex flex-col gap-2.5">
         <SectionLabel
@@ -763,11 +773,14 @@ function ModulesTab({
   modules,
   error,
   structureMermaid,
+  dataflowMermaid,
 }: {
   modules: ModuleInfo[] | null;
   error: string;
   /** M6：结构导图（Project→Module）从项目理解页签移到这里，技术视角归技术页签。 */
   structureMermaid: string;
+  /** M6：模块数据流图同理归入本页签。 */
+  dataflowMermaid: string;
 }) {
   if (error) return <ErrorCard message={error} />;
   if (!modules) return <Loading text="LOADING MODULES…" />;
@@ -804,6 +817,17 @@ function ModulesTab({
         )}
         <ModuleMindmap modules={modules} />
       </section>
+
+      {dataflowMermaid.trim() && (
+        <section className="flex flex-col gap-2.5">
+          <SectionLabel text="DATAFLOW 模块数据流图" />
+          <MermaidDiagram
+            title="模块数据流图"
+            subtitle="模块间接口调用（实线）与跨模块引用（虚线）聚合，边标注为调用次数"
+            code={dataflowMermaid}
+          />
+        </section>
+      )}
 
       {groups.map((g) => {
         const meta = moduleKindMeta(g.kind);

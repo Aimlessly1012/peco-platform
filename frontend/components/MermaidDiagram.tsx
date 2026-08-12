@@ -170,12 +170,24 @@ export default function MermaidDiagram({
 
         {state.kind === "failed" && (
           <div>
-            <div className="mb-2 border-l-2 border-danger bg-danger/[.06] px-3 py-2 text-[11px] leading-relaxed text-danger">
-              图形渲染失败（{briefError(state.message) || "未知原因"}），
-              {fallbackText ? "以下为文字版调用链路" : "以下为 mermaid 源码"}
+            {/* 后端本就只给了文字版（无 mermaid 源码）时不算"渲染失败"，用中性措辞 */}
+            <div
+              className={`mb-2 border-l-2 px-3 py-2 text-[11px] leading-relaxed ${
+                !source && fallbackText
+                  ? "border-line bg-shade text-ink2"
+                  : "border-danger bg-danger/[.06] text-danger"
+              }`}
+            >
+              {!source
+                ? fallbackText
+                  ? "该图未生成图形版本，以下为文字版说明"
+                  : "图形内容为空"
+                : `图形渲染失败（${briefError(state.message) || "未知原因"}），${
+                    fallbackText ? "以下为文字版说明" : "以下为 mermaid 源码"
+                  }`}
             </div>
             <pre className="overflow-x-auto whitespace-pre-wrap border border-line bg-shade p-3 text-[11px] leading-relaxed text-ink2">
-              {fallbackText || source || "（无源码）"}
+              {fallbackText || source || "（无内容）"}
             </pre>
           </div>
         )}

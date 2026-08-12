@@ -74,6 +74,31 @@ FEATURE_PROMPT = """你是资深产品经理。下面是某个软件模块的静
 该模块的实际入口清单（文件路径与其中的函数名）：
 {anchors}"""
 
+FLOW_PROMPT = """你是资深产品经理。下面是某系统的业务分析结果，请把其中的**核心业务流程**\
+画成流程图，给业务人员看。
+
+严格要求（不满足会被判为无效）：
+1. 为每条核心业务流输出一节，最多 {max_flows} 条，格式严格如下（标题行 + 围栏代码块）：
+## <业务流名称，≤12 字>
+```mermaid
+flowchart TD
+    A[用户提交订单] --> B{{是否有库存}}
+    B -->|有| C[生成订单]
+    B -->|无| D[提示缺货]
+```
+2. 每张图不超过 {max_nodes} 个节点，节点文案不超过 12 个字
+3. 节点写**业务步骤**：用户动作或系统行为，例如「填写投放信息」「系统校验预算」「生成结算单」
+4. 严禁出现文件名、函数名、表名与技术词（组件、接口、函数、模块、路由、API、数据库）
+5. 判断分支用 {{}} 节点并在连线上标注条件，例如 B -->|审核通过| C
+6. 只依据下面给出的信息画，禁止编造未提及的环节；信息不足就少画几条
+7. 除标题行与代码块外不要输出任何其他文字
+
+系统的核心业务流（来自项目总览）：
+{flow_lines}
+
+相关功能域的关键流程：
+{module_flows}"""
+
 SEQ_PROMPT = """你是资深软件架构师。基于以下功能模块的静态分析数据，画出该模块核心流程的 mermaid 时序图。
 
 严格要求（不满足会被判为无效）：
@@ -185,6 +210,21 @@ class ReportLLM:
         # 信息越模糊模型纠结越久（实测 800 全被 reasoning 吃光、content 为空），
         # 预算按实际用量计费，给宽不增加成本
         return await self._complete(prompt, max_tokens=2000)
+
+    async def generate_business_flows(
+        self, flow_lines: str, module_flows: str,
+        max_flows: int = 4, max_nodes: int = 8, retry_reason: str = "",
+    ) -> str | None:
+        """业务流程图（M6 B5）：单次调用产出 2-4 张 flowchart。"""
+        prompt = FLOW_PROMPT.format(
+            max_flows=max_flows, max_nodes=max_nodes,
+            flow_lines=flow_lines[:1500] or "（无）",
+            module_flows=module_flows[:4000] or "（无）",
+        )
+        if retry_reason:
+            prompt += f"\n\n上一次输出被判为无效，原因：{retry_reason}。请严格按格式重新输出。"
+        # 多张图 + 推理预算（见模块 docstring）
+        return await self._complete(prompt, max_tokens=6000)
 
     async def generate_sequence(
         self,

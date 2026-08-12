@@ -34,6 +34,22 @@ from app.services.report.mermaid_check import (
 )
 from app.services.report.mindmap import build_mindmap, escape_node_text
 
+GOOD_FLOW_OUTPUT = """## 下单流程
+```mermaid
+flowchart TD
+    A[用户选择商品] --> B[提交订单]
+    B --> C{是否有库存}
+    C -->|有| D[生成订单]
+    C -->|无| E[提示缺货]
+```
+
+## 取消流程
+```mermaid
+flowchart TD
+    A[用户申请取消] --> B[系统校验状态]
+    B --> C[释放库存]
+```"""
+
 GOOD_SEQ = """sequenceDiagram
     participant U as 用户
     participant FE as 订单页面
@@ -110,15 +126,33 @@ class FakeLLM:
     def __init__(
         self, chapter_returns=None, overview_returns="## 一、系统概述\n\n概述正文",
         seq_returns=None, feature_returns="- 创建订单\n- 查询订单列表\n- 取消订单",
+        flow_returns=None,
     ):
         self.chapter_returns = chapter_returns
         self.overview_returns = overview_returns
         self.seq_returns = list(seq_returns or [])
         self.feature_returns = feature_returns
+        self.flow_returns = flow_returns if flow_returns is not None else GOOD_FLOW_OUTPUT
         self.chapter_calls: list[dict] = []
         self.overview_calls: list[tuple] = []
         self.seq_calls: list[dict] = []
         self.feature_calls: list[dict] = []
+        self.flow_calls: list[dict] = []
+
+    async def generate_business_flows(
+        self, flow_lines, module_flows, max_flows=4, max_nodes=8, retry_reason=""
+    ):
+        self.flow_calls.append(
+            {"flow_lines": flow_lines, "module_flows": module_flows,
+             "retry_reason": retry_reason}
+        )
+        value = self.flow_returns
+        if isinstance(value, list):
+            index = len(self.flow_calls) - 1
+            value = value[index] if index < len(value) else None
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     async def generate_features(self, name, kind_label, route_prefix, summary, anchors):
         self.feature_calls.append(

@@ -167,6 +167,8 @@ async def test_build_report_end_to_end(indexed_project):
     assert result.mindmap_mermaid.startswith("mindmap")
     assert result.dataflow_mermaid.startswith("flowchart LR")
     assert result.doc_markdown.startswith("# mini-shop")
+    # M6 B5：业务流程图（L4 无「核心业务流」小节时退回整段总览作为输入）
+    assert result.stats["business_flows_ok"] + result.stats["business_flows_fallback"] >= 1
     assert result.stats["report_modules"] == len(tree.modules)
     assert result.stats["sequences_ok"] == len(core)
     assert result.stats["doc_fallback"] is False

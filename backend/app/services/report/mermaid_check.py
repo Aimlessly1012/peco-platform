@@ -102,6 +102,66 @@ def validate_sequence(text: str) -> tuple[bool, str]:
     return True, ""
 
 
+FLOW_ARROW_RE = re.compile(r"(-{2,3}>|-\.->|={2,3}>|-{3}|-\.-)")
+FLOW_HEADER_RE = re.compile(r"^(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)\s*$", re.I)
+FLOW_NODE_RE = re.compile(r"^[A-Za-z_][\w]*\s*(?:\[|\(|\{|>).+$")
+FLOW_KEYWORDS = ("subgraph", "end", "classdef", "class", "style", "click", "direction", "linkstyle")
+# 业务流程图的节点上限（M6 B5：一张图讲一条流，超了就不是"流"而是"网"）
+MAX_FLOW_NODES = 8
+
+
+def _flow_node_ids(line: str) -> list[str]:
+    """从一行里抠出节点 id（边行两端 + 独立节点定义）。"""
+    parts = FLOW_ARROW_RE.split(line)
+    ids: list[str] = []
+    for part in parts:
+        if FLOW_ARROW_RE.fullmatch(part):
+            continue
+        token = part.strip()
+        token = re.sub(r"\|[^|]*\|", "", token).strip()  # 去掉边标签 |文案|
+        match = re.match(r"^([A-Za-z_][\w]*)", token)
+        if match:
+            ids.append(match.group(1))
+    return ids
+
+
+def validate_flowchart(text: str, max_nodes: int = MAX_FLOW_NODES) -> tuple[bool, str]:
+    """业务流程图校验（M6 B5）：与时序图同一套启发式思路，只挡"必炸"与"跑题"。"""
+    body = strip_fence(text)
+    if not body:
+        return False, "输出为空"
+    lines = _meaningful_lines(body)
+    if not lines:
+        return False, "图内容为空"
+    if not FLOW_HEADER_RE.match(lines[0].strip()):
+        return False, f"首行不是 flowchart 声明（实际：{lines[0].strip()[:40]}）"
+
+    node_ids: list[str] = []
+    edges = 0
+    for line in lines[1:]:
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if lowered.split(" ", 1)[0].rstrip(":") in FLOW_KEYWORDS:
+            continue
+        if FLOW_ARROW_RE.search(stripped):
+            edges += 1
+            node_ids.extend(_flow_node_ids(stripped))
+            continue
+        if FLOW_NODE_RE.match(stripped):
+            node_ids.extend(_flow_node_ids(stripped))
+            continue
+        return False, f"无法识别的行（疑似混入说明文字）：{stripped[:60]}"
+
+    if not edges:
+        return False, "没有任何连线，不构成流程"
+    unique = list(dict.fromkeys(node_ids))
+    if len(unique) < 2:
+        return False, "节点不足 2 个，流程无意义"
+    if len(unique) > max_nodes:
+        return False, f"节点数 {len(unique)} 超过上限 {max_nodes}"
+    return True, ""
+
+
 def validate_mindmap(text: str) -> tuple[bool, str]:
     """思维导图校验（程序化生成，作为自检兜底）。"""
     body = strip_fence(text)

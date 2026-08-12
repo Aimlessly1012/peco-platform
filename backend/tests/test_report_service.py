@@ -95,10 +95,14 @@ async def test_generate_and_store_writes_all_four(test_db, stub_graph):
     report = await _load_report(test_db, pid)
     assert report.doc_markdown.startswith("# mini-shop 需求逻辑文档")
     assert "### 章节" in report.doc_markdown
+    assert report.feature_map_markdown.startswith("# mini-shop：")
     assert report.mindmap_mermaid.startswith("mindmap")
     assert report.dataflow_mermaid.startswith("flowchart LR")
     assert len(report.sequences_json) == 2
     assert all(s["mermaid"] for s in report.sequences_json)
+    # M6 B5：业务流程图
+    assert [f["title"] for f in report.business_flows_json] == ["下单流程", "取消流程"]
+    assert stats["business_flows_ok"] == 2
 
 
 async def test_fast_depth_produces_only_programmatic_artifacts(test_db, stub_graph):
@@ -111,12 +115,15 @@ async def test_fast_depth_produces_only_programmatic_artifacts(test_db, stub_gra
     assert stats["report_ok"] is True
     assert stats["report_depth"] == IndexDepth.FAST
     assert llm.chapter_calls == [] and llm.seq_calls == [] and llm.overview_calls == []
+    assert llm.flow_calls == [] and llm.feature_calls == []
 
     report = await _load_report(test_db, pid)
     assert report.mindmap_mermaid.startswith("mindmap")
     assert report.dataflow_mermaid.startswith("flowchart LR")
+    assert report.feature_map_markdown.startswith("# mini-shop：")  # 程序化功能导图仍有
     assert report.doc_markdown == ""
     assert report.sequences_json == []
+    assert report.business_flows_json == []       # M6 B5：fast 跳过业务流程图
 
 
 async def test_partial_when_sequence_falls_back(test_db, stub_graph):
