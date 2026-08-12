@@ -24,7 +24,7 @@
 - **THEN** 列表接口/页面显示该项目状态为 indexing，并能看到阶段 embed 与进度 60%
 
 ### Requirement: 触发索引任务
-系统 SHALL 提供 `POST /projects/{id}/index` 触发索引；同一项目已存在 running 任务时 MUST 返回 409；任务创建后异步执行，接口立即返回任务 id。
+系统 SHALL 提供 `POST /projects/{id}/index` 触发索引，支持查询参数 `mode=auto|full`（默认 auto，语义见 indexing-pipeline「重建与增量语义」）；同一项目已存在 running 任务时 MUST 返回 409；任务创建后异步执行，接口立即返回任务 id，任务记录的 kind SHALL 反映实际执行模式（full/incremental）。
 
 #### Scenario: 重复触发被拒绝
 - **WHEN** 项目已有 running 索引任务，再次调用触发接口
@@ -32,7 +32,11 @@
 
 #### Scenario: 失败后重试
 - **WHEN** 项目上次索引任务为 failed，用户再次触发索引
-- **THEN** 创建新任务并执行（M1 语义为全量重建）
+- **THEN** 创建新任务并执行（auto 模式按增量判定规则决定实际路径）
+
+#### Scenario: 强制全量
+- **WHEN** 以 mode=full 触发索引
+- **THEN** 执行全量重建，任务 kind 为 full
 
 ### Requirement: 索引任务进度查询
 系统 SHALL 提供任务查询接口，返回任务的 kind、status、stage（clone/parse/summarize/embed/graph/report）、progress(0-100)、stats（文件数/块数/跳过数/模块数/摘要计数/报告计数）、error_text；前端 SHALL 以轮询（约 2s）刷新进度，进度条按六阶段展示（拉取代码/解析分块/生成摘要/向量化/写入图谱/生成报告）。
