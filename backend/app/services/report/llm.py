@@ -12,20 +12,32 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-DOC_PROMPT = """你是资深软件架构师。基于以下对代码仓库的静态分析结果，撰写一份《需求逻辑文档》，\
-用业务视角说明这个系统做什么、每个功能模块承担什么需求、请求与数据如何流转。
+CHAPTER_PROMPT = """你是资深软件架构师。为下列功能模块各写一节《需求逻辑文档》正文。
+
+严格格式要求（整篇文档由多批拼接，格式必须统一）：
+1. 输出纯 Markdown，不要用 ``` 包裹，不要写文档标题与其他章节
+2. 每个模块一节，固定结构：
+   ### <模块名>（<类型>{prefix_hint}）
+   **业务目标**：一句话
+   **核心需求**：2-4 条无序列表
+   **关键文件**：列出给定的文件路径
+3. 只使用下面给出的信息，不得编造未出现过的模块名、文件路径或接口
+4. 中文，每个模块 150 字以内
+5. 严格按给定顺序输出全部 {count} 个模块，不要增删
+
+本批模块（共 {count} 个）：
+{module_blocks}"""
+
+OVERVIEW_PROMPT = """你是资深软件架构师。基于以下信息写《需求逻辑文档》的开头部分。
 
 严格要求：
-1. 输出纯 Markdown 正文，不要用 ``` 把整篇文档包起来
-2. 结构固定为：
-   # {project_name} 需求逻辑文档
+1. 输出纯 Markdown，不要用 ``` 包裹
+2. 只输出这两节，不要输出功能模块章节（它们由其他部分提供）：
    ## 一、系统概述
-   ## 二、功能模块需求
-   ### 2.x <模块名>（<类型>，路由 <前缀>）
-   每个模块下写：业务目标（一句话）、核心需求（2-4 条）、关键文件（列出给定的文件路径）
    ## 三、端到端业务流
-3. 只使用下面给出的信息，不得编造未出现过的模块名、文件路径或接口
-4. 全文中文，1500 字以内
+3. 系统概述说明：系统定位、技术栈与架构风格、模块划分逻辑
+4. 端到端业务流写 2-4 条主链路，每条串起相关模块名
+5. 只使用下面给出的信息，不得编造模块名或接口。中文，600 字以内
 
 项目总览：
 {overview}
@@ -33,8 +45,8 @@ DOC_PROMPT = """你是资深软件架构师。基于以下对代码仓库的静�
 功能模块地图：
 {module_lines}
 
-各模块摘要：
-{module_summaries}"""
+已生成的模块章节标题：
+{chapter_titles}"""
 
 SEQ_PROMPT = """你是资深软件架构师。基于以下功能模块的静态分析数据，画出该模块核心流程的 mermaid 时序图。
 
@@ -108,16 +120,25 @@ class ReportLLM:
                 return None
         return None
 
-    async def generate_doc(
-        self, project_name: str, overview: str, module_lines: str, module_summaries: str
+    async def generate_chapters(self, module_blocks: str, count: int) -> str | None:
+        """一批模块的章节正文（M5 D3 的 map 步）。"""
+        prompt = CHAPTER_PROMPT.format(
+            count=count,
+            prefix_hint="，路由 <前缀>",
+            module_blocks=module_blocks[:8000],
+        )
+        return await self._complete(prompt, max_tokens=2500)
+
+    async def generate_overview(
+        self, overview: str, module_lines: str, chapter_titles: str
     ) -> str | None:
-        prompt = DOC_PROMPT.format(
-            project_name=project_name or "本项目",
+        """系统概述 + 端到端业务流（M5 D3 的 reduce 步，单次小调用）。"""
+        prompt = OVERVIEW_PROMPT.format(
             overview=overview[:2000] or "（无项目总览）",
             module_lines=module_lines[:3000] or "（无模块）",
-            module_summaries=module_summaries[:8000] or "（无模块摘要）",
+            chapter_titles=chapter_titles[:2000] or "（无章节）",
         )
-        return await self._complete(prompt, max_tokens=3000)
+        return await self._complete(prompt, max_tokens=1200)
 
     async def generate_sequence(
         self,

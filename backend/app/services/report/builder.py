@@ -16,8 +16,11 @@ logger = logging.getLogger(__name__)
 CORE_MODULE_KINDS = {"api", "page"}
 CORE_MIN_FILES = 2
 MAX_CORE_MODULES = 6
-MAX_ENTRY_FILES = 6
-MAX_EDGE_LINES = 20
+# M5 D4：时序图输入瘦身——入口 ≤5、每类边 ≤15，超限截断并在 prompt 注明只给主链路
+MAX_ENTRY_FILES = 5
+MAX_EDGE_LINES = 15
+# M5 D3：文档 map-reduce 的批大小。49 个 L3 塞一个 prompt 必然超限，整篇塌方
+MAX_MODULES_PER_BATCH = 10
 
 
 @dataclass
@@ -48,8 +51,13 @@ def select_core_modules(
     return candidates[:limit]
 
 
+def _rank_edges(edges: list, entry_paths: set[str], key) -> list:
+    """入口文件相关的边排前面——时序图要画的是主链路，不是模块内全部依赖。"""
+    return sorted(edges, key=lambda e: 0 if key(e) & entry_paths else 1)
+
+
 def build_module_context(mod: ModuleNode, edges: GraphEdges) -> ModuleContext:
-    """挑入口文件 + 抽取与该模块相关的 CALLS_API / IMPORTS 边清单。"""
+    """挑入口文件 + 抽取以入口为中心的 CALLS_API / IMPORTS 边清单（M5 D4 瘦身）。"""
     paths = {f.path for f in mod.files}
 
     api_edges = [
@@ -71,13 +79,26 @@ def build_module_context(mod: ModuleNode, edges: GraphEdges) -> ModuleContext:
         )
 
     entry_files = sorted(mod.files, key=score)[:MAX_ENTRY_FILES]
+    entry_paths = {f.path for f in entry_files}
+
+    ranked_api = _rank_edges(api_edges, entry_paths, lambda e: {e.src_file, e.dst_file})
+    ranked_imports = _rank_edges(import_edges, entry_paths, lambda e: {e.src})
 
     api_lines = [
         f"{e.src_file}:{e.src_symbol}(L{e.src_start}) --HTTP--> "
         f"{e.dst_file}:{e.dst_symbol}(L{e.dst_start})"
-        for e in api_edges[:MAX_EDGE_LINES]
+        for e in ranked_api[:MAX_EDGE_LINES]
     ]
-    import_lines = [f"{e.src} → {e.dst}" for e in import_edges[:MAX_EDGE_LINES]]
+    import_lines = [f"{e.src} → {e.dst}" for e in ranked_imports[:MAX_EDGE_LINES]]
+    # 截断时明确告诉模型"这只是主链路"，避免它以为看到了全貌而编造收尾步骤
+    if len(ranked_api) > MAX_EDGE_LINES:
+        api_lines.append(
+            f"（仅列出主链路前 {MAX_EDGE_LINES} 条，模块内共 {len(ranked_api)} 条）"
+        )
+    if len(ranked_imports) > MAX_EDGE_LINES:
+        import_lines.append(
+            f"（仅列出主链路前 {MAX_EDGE_LINES} 条，模块内共 {len(ranked_imports)} 条）"
+        )
     return ModuleContext(
         module=mod, entry_files=entry_files,
         api_lines=api_lines, import_lines=import_lines,
@@ -147,18 +168,126 @@ def fallback_doc(tree: ProjectTree) -> str:
     return "\n".join(parts) + "\n"
 
 
-async def generate_doc(tree: ProjectTree, llm) -> tuple[str, bool]:
-    """返回 (doc_markdown, 是否降级)。LLM 失败或输出为空即降级为拼接文档。"""
-    try:
-        text = await llm.generate_doc(
-            tree.name, tree.summary, build_module_lines(tree), build_module_summaries(tree)
+def split_module_batches(
+    tree: ProjectTree, batch_size: int = MAX_MODULES_PER_BATCH
+) -> list[list[ModuleNode]]:
+    """按 kind 分组后切批（M5 D3）：同批模块类型一致，章节风格更稳。"""
+    by_kind: dict[str, list[ModuleNode]] = {}
+    for mod in tree.modules:
+        by_kind.setdefault(mod.kind, []).append(mod)
+
+    kind_order = {"api": 0, "page": 1, "dir": 2, "shared": 3}
+    batches: list[list[ModuleNode]] = []
+    for kind in sorted(by_kind, key=lambda k: (kind_order.get(k, 9), k)):
+        members = sorted(by_kind[kind], key=lambda m: (-len(m.files), m.name))
+        for i in range(0, len(members), batch_size):
+            batches.append(members[i : i + batch_size])
+    return batches
+
+
+def build_batch_input(modules: list[ModuleNode]) -> str:
+    """一批模块的 LLM 输入：L3 摘要 + 关键文件清单。"""
+    blocks = []
+    for mod in modules:
+        label = KIND_LABEL.get(mod.kind, mod.kind)
+        files = ", ".join(f.path for f in mod.files[:10])
+        more = f" 等 {len(mod.files)} 个文件" if len(mod.files) > 10 else ""
+        blocks.append(
+            f"模块名：{mod.name}\n"
+            f"类型：{label}\n"
+            f"路由前缀：{mod.route_prefix or '无'}\n"
+            f"职责摘要：{mod.summary or '（无摘要）'}\n"
+            f"关键文件：{files}{more}"
         )
+    return "\n\n---\n\n".join(blocks)
+
+
+def fallback_chapters(modules: list[ModuleNode]) -> str:
+    """单批失败时只降级这一批（M5 spec：批为降级粒度）。"""
+    parts = []
+    for mod in modules:
+        label = KIND_LABEL.get(mod.kind, mod.kind)
+        prefix = f"，路由 {mod.route_prefix}" if mod.route_prefix else ""
+        parts.append(f"### {mod.name}（{label}{prefix}）")
+        parts.append("")
+        parts.append("> 本节由模型调用失败后自动降级产出，内容为索引阶段的原始摘要。")
+        parts.append("")
+        parts.append(mod.summary or "（暂无模块摘要）")
+        if mod.files:
+            parts.append("")
+            parts.append("**关键文件**：")
+            parts += [f"- {f.path}" for f in mod.files[:15]]
+            if len(mod.files) > 15:
+                parts.append(f"- … 其余 {len(mod.files) - 15} 个文件")
+        parts.append("")
+    return "\n".join(parts)
+
+
+def chapter_titles(tree: ProjectTree) -> str:
+    return "\n".join(
+        f"- {m.name}（{KIND_LABEL.get(m.kind, m.kind)}）" for m in tree.modules
+    )
+
+
+async def _generate_one_batch(modules: list[ModuleNode], llm) -> tuple[str, bool]:
+    """返回 (章节 markdown, 是否降级)。单批失败只影响本批。"""
+    try:
+        text = await llm.generate_chapters(build_batch_input(modules), len(modules))
     except Exception as e:  # noqa: BLE001 — 报告不阻塞索引
-        logger.warning("需求逻辑文档生成异常（%s: %s），降级拼接", type(e).__name__, e)
+        logger.warning("文档章节批次异常（%s: %s），该批降级拼接", type(e).__name__, e)
         text = None
     if not text or not text.strip():
+        logger.warning("文档章节批次未产出内容（%d 个模块），该批降级拼接", len(modules))
+        return fallback_chapters(modules), True
+    body = strip_fence(text) if text.strip().startswith("```") else text.strip()
+    return body, False
+
+
+async def generate_doc(tree: ProjectTree, llm) -> tuple[str, bool]:
+    """map-reduce 生成需求逻辑文档（M5 D3）。返回 (doc_markdown, 是否整篇降级)。
+
+    map：模块分批并发生成章节；reduce：以章节清单生成系统概述。
+    单批失败只降级该批，全部批失败才算整篇降级——这是修掉"49 个 L3 塞单 prompt
+    导致整篇塌成拼接"的根因所在。
+    """
+    batches = split_module_batches(tree)
+    if not batches:
         return fallback_doc(tree), True
-    return strip_fence(text) if text.strip().startswith("```") else text.strip(), False
+
+    results = await asyncio.gather(
+        *(_generate_one_batch(batch, llm) for batch in batches)
+    )
+    chapters = [text for text, _ in results]
+    degraded_batches = sum(1 for _, degraded in results if degraded)
+    all_degraded = degraded_batches == len(batches)
+
+    overview = ""
+    if not all_degraded:
+        try:
+            overview = await llm.generate_overview(
+                tree.summary, build_module_lines(tree), chapter_titles(tree)
+            ) or ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning("系统概述生成异常（%s: %s），用总览原文", type(e).__name__, e)
+    if not overview.strip():
+        overview = f"## 一、系统概述\n\n{tree.summary or '（暂无项目总览）'}"
+    elif overview.strip().startswith("```"):
+        overview = strip_fence(overview)
+
+    doc = "\n\n".join(
+        [
+            f"# {tree.name or '项目'} 需求逻辑文档",
+            overview.strip(),
+            "## 二、功能模块需求",
+            "\n\n".join(chapter.strip() for chapter in chapters if chapter.strip()),
+        ]
+    )
+    if degraded_batches:
+        doc += (
+            f"\n\n> 说明：本次生成中有 {degraded_batches}/{len(batches)} 批模块章节"
+            f"因模型调用失败降级为原始摘要拼接。\n"
+        )
+    return doc + "\n", all_degraded
 
 
 async def generate_one_sequence(ctx: ModuleContext, llm) -> dict:

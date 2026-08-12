@@ -293,8 +293,8 @@ def started_jobs(monkeypatch, test_db):
 
     calls: list[dict] = []
 
-    async def fake_start(project_id, mode="auto"):
-        calls.append({"project_id": project_id, "mode": mode})
+    async def fake_start(project_id, mode="auto", depth="deep"):
+        calls.append({"project_id": project_id, "mode": mode, "depth": depth})
         if calls[-1].get("blocked"):
             return None
         async with test_db() as session:
@@ -345,7 +345,7 @@ async def test_index_rejects_unknown_mode(api_client, test_db, started_jobs):
 
 async def test_index_conflict_semantics_unchanged(api_client, test_db, monkeypatch):
     """spec 场景: 已有 running 任务时仍返回 409（mode 参数不改变这个语义）。"""
-    async def fake_start(project_id, mode="auto"):
+    async def fake_start(project_id, mode="auto", depth="deep"):
         return None
 
     monkeypatch.setattr("app.api.projects.start_index_job", fake_start)

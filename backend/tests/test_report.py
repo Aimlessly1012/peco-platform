@@ -5,6 +5,9 @@ LLM 全部用 mock（FakeLLM），不触网；图数据用手写 dataclass，不
 import pytest
 
 from app.services.report.builder import (
+    MAX_EDGE_LINES,
+    MAX_ENTRY_FILES,
+    build_batch_input,
     build_fallback_text,
     build_module_context,
     build_module_lines,
@@ -13,6 +16,7 @@ from app.services.report.builder import (
     generate_one_sequence,
     generate_sequences,
     select_core_modules,
+    split_module_batches,
 )
 from app.services.report.graph_reader import (
     ApiEdgeInfo,
@@ -98,19 +102,39 @@ def make_edges() -> GraphEdges:
 
 
 class FakeLLM:
-    """可编程假 LLM：doc_returns / seq_returns 支持值、None 与异常实例。"""
+    """可编程假 LLM。
 
-    def __init__(self, doc_returns=None, seq_returns=None):
-        self.doc_returns = doc_returns
+    chapter_returns 按批次依次取值（支持值、None、异常实例）；给单个值时所有批次复用它。
+    """
+
+    def __init__(
+        self, chapter_returns=None, overview_returns="## 一、系统概述\n\n概述正文",
+        seq_returns=None,
+    ):
+        self.chapter_returns = chapter_returns
+        self.overview_returns = overview_returns
         self.seq_returns = list(seq_returns or [])
-        self.doc_calls: list[tuple] = []
+        self.chapter_calls: list[dict] = []
+        self.overview_calls: list[tuple] = []
         self.seq_calls: list[dict] = []
 
-    async def generate_doc(self, project_name, overview, module_lines, module_summaries):
-        self.doc_calls.append((project_name, overview, module_lines, module_summaries))
-        if isinstance(self.doc_returns, Exception):
-            raise self.doc_returns
-        return self.doc_returns
+    async def generate_chapters(self, module_blocks, count):
+        self.chapter_calls.append({"blocks": module_blocks, "count": count})
+        value = self.chapter_returns
+        if isinstance(value, list):
+            index = len(self.chapter_calls) - 1
+            value = value[index] if index < len(value) else None
+        if isinstance(value, Exception):
+            raise value
+        if value is None:
+            return None
+        return value if isinstance(value, str) else str(value)
+
+    async def generate_overview(self, overview, module_lines, chapter_titles):
+        self.overview_calls.append((overview, module_lines, chapter_titles))
+        if isinstance(self.overview_returns, Exception):
+            raise self.overview_returns
+        return self.overview_returns
 
     async def generate_sequence(
         self, name, kind, prefix, summary, entry_summaries,
@@ -128,8 +152,8 @@ class FakeLLM:
 # ---------------- 思维导图（B2，程序化生成） ----------------
 
 
-def test_mindmap_structure_matches_graph():
-    """spec: mindmap 模块与文件层级与图结构一致，不含图中不存在的名称。"""
+def test_mindmap_is_two_level_only():
+    """M5 spec 场景: 顶层导图节点数 ≤ 模块数 + 1（不含文件层）。"""
     tree = make_tree()
     out = build_mindmap(tree)
     lines = out.splitlines()
@@ -137,26 +161,38 @@ def test_mindmap_structure_matches_graph():
     assert lines[0] == "mindmap"
     assert lines[1] == '  root(("mini-shop"))'
 
-    # 每个模块一行（缩进 4）、每个文件一行（缩进 6），层级严格递进
-    module_lines = [ln for ln in lines if ln.startswith("    ") and not ln.startswith("      ")]
-    file_lines = [ln for ln in lines if ln.startswith("      ")]
+    module_lines = [ln for ln in lines if ln.startswith("    ")]
     assert len(module_lines) == len(tree.modules)
-    assert len(file_lines) == sum(len(m.files) for m in tree.modules)
-
-    # 不含图中不存在的名称：文件行文本必须是图里的真实路径
-    graph_paths = {f.path for m in tree.modules for f in m.files}
-    for ln in file_lines:
-        text = ln.split('["', 1)[1].rsplit('"]', 1)[0]
-        assert text in graph_paths, f"mindmap 出现图中不存在的文件：{text}"
+    assert len(lines) == len(tree.modules) + 2  # mindmap 行 + root 行 + 模块行
+    # 文件层已移除（改由前端按需拼装）
+    assert "backend/routers/orders.py" not in out
     for m in tree.modules:
         assert m.name in out
 
 
-def test_mindmap_module_label_carries_kind_and_prefix():
+def test_mindmap_scales_to_large_project():
+    """49 模块 1160 文件的真实场景：节点数只跟模块数走。"""
+    tree = ProjectTree(
+        project_id="p1", name="big-app",
+        modules=[
+            ModuleNode(
+                key=f"page:m{i}", name=f"m{i}", kind="page",
+                files=[FileNode(path=f"src/pages/m{i}/f{j}.tsx") for j in range(24)],
+            )
+            for i in range(49)
+        ],
+    )
+    out = build_mindmap(tree)
+
+    assert len(out.splitlines()) == 49 + 2
+    assert validate_mindmap(out) == (True, "")
+
+
+def test_mindmap_module_label_carries_kind_prefix_and_count():
     out = build_mindmap(make_tree())
-    assert "[接口] orders /api/orders" in out
-    assert "[页面] orders /orders" in out
-    assert "[共享] shared" in out
+    assert "[接口] orders /api/orders · 2 文件" in out
+    assert "[页面] orders /orders · 3 文件" in out
+    assert "[共享] shared · 1 文件" in out
 
 
 def test_mindmap_is_valid_by_self_check():
@@ -169,21 +205,6 @@ def test_mindmap_empty_modules():
     assert out.startswith("mindmap")
     assert "暂无模块数据" in out
     assert validate_mindmap(out)[0] is True
-
-
-def test_mindmap_truncates_file_list():
-    tree = ProjectTree(
-        project_id="p1", name="big",
-        modules=[
-            ModuleNode(
-                key="api:big", name="big", kind="api",
-                files=[FileNode(path=f"src/f{i}.py") for i in range(15)],
-            )
-        ],
-    )
-    out = build_mindmap(tree, max_files=12)
-    assert "… 其余 3 个文件" in out
-    assert "src/f12.py" not in out
 
 
 @pytest.mark.parametrize(
@@ -307,6 +328,41 @@ def test_select_core_modules_limit():
     assert len(select_core_modules(tree)) == 6
 
 
+def test_module_context_truncates_to_main_path():
+    """M5 D4: 入口 ≤5、每类边 ≤15，截断时 prompt 里注明只给主链路。"""
+    files = [FileNode(path=f"src/f{i}.ts", summary=f"文件 {i}") for i in range(12)]
+    mod = ModuleNode(key="page:big", name="big", kind="page", files=files)
+    # 12 个文件、每个文件两条边 → 24 条，超过 15 的上限
+    edges = GraphEdges(
+        api_edges=[
+            ApiEdgeInfo(
+                src_file=f"src/f{i % 12}.ts", src_symbol=f"call{i}", src_start=i,
+                dst_file="backend/api.py", dst_symbol=f"handler{i}", dst_start=i,
+            )
+            for i in range(24)
+        ],
+        import_edges=[
+            ImportEdgeInfo(src=f"src/f{i % 12}.ts", dst=f"vendor/lib{i}.ts")
+            for i in range(24)
+        ],
+    )
+
+    ctx = build_module_context(mod, edges)
+
+    assert len(ctx.entry_files) == MAX_ENTRY_FILES
+    assert len([ln for ln in ctx.api_lines if "仅列出主链路" not in ln]) == MAX_EDGE_LINES
+    assert len([ln for ln in ctx.import_lines if "仅列出主链路" not in ln]) == MAX_EDGE_LINES
+    assert any("仅列出主链路" in line for line in ctx.api_lines)
+    assert any("仅列出主链路" in line for line in ctx.import_lines)
+
+
+def test_module_context_no_truncation_note_when_within_limits():
+    tree = make_tree()
+    mod = next(m for m in tree.modules if m.key == "api:orders")
+    ctx = build_module_context(mod, make_edges())
+    assert not any("仅列出主链路" in line for line in ctx.api_lines)
+
+
 def test_build_module_context_filters_edges_and_ranks_entries():
     tree = make_tree()
     mod = next(m for m in tree.modules if m.key == "api:orders")
@@ -350,31 +406,111 @@ def test_build_module_lines_covers_all_modules():
 # ---------------- 需求逻辑文档：正常与降级（B3） ----------------
 
 
-async def test_generate_doc_uses_llm_output():
-    llm = FakeLLM(doc_returns="# 文档\n正文内容")
-    doc, fallback = await generate_doc(make_tree(), llm)
-    assert fallback is False
-    assert doc == "# 文档\n正文内容"
-    assert llm.doc_calls[0][0] == "mini-shop"
+def big_tree(module_count: int = 49) -> ProjectTree:
+    """49 模块的真实规模——把整篇塞一个 prompt 正是现在塌方的原因。"""
+    kinds = ["api", "page", "dir"]
+    return ProjectTree(
+        project_id="p1", name="big-app", summary="大型全栈项目",
+        modules=[
+            ModuleNode(
+                key=f"{kinds[i % 3]}:m{i}", name=f"m{i}", kind=kinds[i % 3],
+                summary=f"m{i} 模块职责",
+                files=[FileNode(path=f"src/m{i}/f{j}.ts") for j in range(3)],
+            )
+            for i in range(module_count)
+        ],
+    )
 
 
-async def test_generate_doc_strips_wrapping_fence():
-    llm = FakeLLM(doc_returns="```markdown\n# 文档\n正文\n```")
-    doc, fallback = await generate_doc(make_tree(), llm)
+def test_split_module_batches_size_and_grouping():
+    """M5 D3: 按 kind 分组、每批 ≤10 个模块。"""
+    batches = split_module_batches(big_tree(49))
+
+    assert all(len(b) <= 10 for b in batches)
+    assert sum(len(b) for b in batches) == 49
+    # 同一批内 kind 一致（分组切批的目的：章节风格稳定）
+    assert all(len({m.kind for m in batch}) == 1 for batch in batches)
+
+
+def test_split_module_batches_small_project():
+    batches = split_module_batches(make_tree())
+    assert sum(len(b) for b in batches) == 4
+    assert all(len(b) <= 10 for b in batches)
+
+
+async def test_generate_doc_map_reduce():
+    llm = FakeLLM(chapter_returns="### 某模块（接口）\n**业务目标**：略")
+    doc, fallback = await generate_doc(big_tree(49), llm)
+
     assert fallback is False
-    assert doc.startswith("# 文档")
-    assert "```" not in doc
+    assert len(llm.chapter_calls) == len(split_module_batches(big_tree(49)))
+    assert len(llm.overview_calls) == 1          # reduce 只调一次
+    assert doc.startswith("# big-app 需求逻辑文档")
+    assert "## 一、系统概述" in doc
+    assert "## 二、功能模块需求" in doc
+    # 每批输入都远小于单 prompt 全量（现失败根因）
+    assert all(call["count"] <= 10 for call in llm.chapter_calls)
+
+
+async def test_generate_doc_single_batch_failure_does_not_collapse_document():
+    """M5 spec 场景: 5 批中 1 批失败，其余章节与概述正常，仅该批降级标注。"""
+    tree = big_tree(49)
+    batches = split_module_batches(tree)
+    returns = ["### 正常章节\n内容"] * len(batches)
+    returns[1] = RuntimeError("上游 500")
+
+    doc, fallback = await generate_doc(tree, FakeLLM(chapter_returns=returns))
+
+    assert fallback is False                      # 整篇没塌
+    assert "## 一、系统概述" in doc
+    assert doc.count("### 正常章节") == len(batches) - 1
+    assert f"有 1/{len(batches)} 批模块章节" in doc  # 降级被明确标注
+    # 失败批的模块仍以原始摘要出现，不是整段消失
+    failed_module = batches[1][0]
+    assert failed_module.name in doc
+    assert failed_module.summary in doc
 
 
 @pytest.mark.parametrize("bad", [None, "", "   ", RuntimeError("上游 500")])
-async def test_generate_doc_falls_back(bad):
-    """spec: 文档生成失败降级为 L4+L3 原文拼接。"""
-    doc, fallback = await generate_doc(make_tree(), FakeLLM(doc_returns=bad))
+async def test_generate_doc_all_batches_fail_falls_back(bad):
+    """全部批失败才算整篇降级（仍产出可读文档）。"""
+    doc, fallback = await generate_doc(make_tree(), FakeLLM(chapter_returns=bad))
+
     assert fallback is True
     assert doc.startswith("# mini-shop 需求逻辑文档")
     assert "全栈演示项目：订单与用户" in doc      # L4
     assert "订单接口模块：创建与查询订单" in doc  # L3
     assert "backend/routers/orders.py" in doc     # 关键文件
+
+
+async def test_generate_doc_overview_failure_uses_project_summary():
+    """概述失败不影响已生成的章节。"""
+    llm = FakeLLM(
+        chapter_returns="### 某模块（接口）\n内容",
+        overview_returns=RuntimeError("超时"),
+    )
+    doc, fallback = await generate_doc(make_tree(), llm)
+
+    assert fallback is False
+    assert "## 一、系统概述" in doc
+    assert "全栈演示项目：订单与用户" in doc  # 回退用 L4 原文
+    assert "### 某模块（接口）" in doc
+
+
+async def test_generate_doc_strips_wrapping_fence():
+    llm = FakeLLM(chapter_returns="```markdown\n### 模块\n正文\n```")
+    doc, _ = await generate_doc(make_tree(), llm)
+    assert "```markdown" not in doc
+    assert "### 模块" in doc
+
+
+def test_build_batch_input_contains_summary_and_files():
+    tree = make_tree()
+    text = build_batch_input([tree.modules[0]])
+
+    assert "模块名：orders" in text
+    assert "订单接口模块：创建与查询订单" in text
+    assert "backend/routers/orders.py" in text
 
 
 def test_fallback_doc_is_readable_markdown():

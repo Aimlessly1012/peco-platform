@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StageBar from "@/components/StageBar";
-import { api, IndexJob, Project } from "@/lib/api";
+import { api, IndexDepth, IndexJob, Project } from "@/lib/api";
 import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/labels";
 
 const COLS = "grid-cols-[14px_1fr_150px_150px_176px]";
@@ -46,10 +46,12 @@ export default function ProjectListPage() {
     };
   }, [refresh]);
 
-  const triggerIndex = async (id: string) => {
+  /** 重新索引保持项目原有深度：fast 项目不会因为点一下 ⟳ 就产生 LLM 成本。 */
+  const triggerIndex = async (p: Project) => {
     setError("");
     try {
-      await api(`/projects/${id}/index`, { method: "POST" });
+      const query = p.index_depth === "fast" ? "?depth=fast" : "";
+      await api(`/projects/${p.id}/index${query}`, { method: "POST" });
       refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -186,6 +188,11 @@ export default function ProjectListPage() {
                       <div className="mt-[3px] truncate text-[11px] text-muted">
                         {p.git_url}
                         {p.default_branch ? ` · ${p.default_branch}` : ""}
+                        {p.index_depth === "fast" && (
+                          <span className="ml-1.5 text-accent" title="快速模式索引，未生成深度理解">
+                            · FAST
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className="text-xs text-muted">
@@ -216,9 +223,15 @@ export default function ProjectListPage() {
                         </span>
                       )}
                       <button
-                        onClick={() => triggerIndex(p.id)}
+                        onClick={() => triggerIndex(p)}
                         disabled={p.status === "indexing"}
-                        title={p.status === "pending" ? "开始索引" : "重新索引"}
+                        title={
+                          p.status === "pending"
+                            ? "开始索引"
+                            : p.index_depth === "fast"
+                              ? "重新索引（保持快速模式）"
+                              : "重新索引"
+                        }
                         className="border border-line px-[10px] py-[5px] text-muted hover:text-ink disabled:opacity-40"
                       >
                         {p.status === "pending" ? "开始索引" : "⟳"}
@@ -275,6 +288,19 @@ export default function ProjectListPage() {
   );
 }
 
+const DEPTHS: { key: IndexDepth; title: string; hint: string }[] = [
+  {
+    key: "deep",
+    title: "深度理解",
+    hint: "完整 AI 分析：文件摘要、需求文档、时序图、数据流图",
+  },
+  {
+    key: "fast",
+    title: "快速录入",
+    hint: "快速模式零 AI 成本，仅结构与代码检索",
+  },
+];
+
 function NewProjectDialog({
   onClose,
   onCreated,
@@ -283,6 +309,7 @@ function NewProjectDialog({
   onCreated: () => void;
 }) {
   const [form, setForm] = useState({ name: "", git_url: "", git_token: "", default_branch: "" });
+  const [depth, setDepth] = useState<IndexDepth>("deep");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -303,7 +330,7 @@ function NewProjectDialog({
           default_branch: form.default_branch || null,
         }),
       });
-      await api(`/projects/${project.id}/index`, { method: "POST" });
+      await api(`/projects/${project.id}/index?depth=${depth}`, { method: "POST" });
       onCreated();
     } catch (e) {
       setError((e as Error).message);
@@ -369,11 +396,47 @@ function NewProjectDialog({
             </div>
           </div>
 
+          <div className="mt-[15px] flex flex-col gap-1.5">
+            <span className={label}>DEPTH 索引深度</span>
+            <div className="grid grid-cols-2 gap-[13px]">
+              {DEPTHS.map((d) => {
+                const on = depth === d.key;
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setDepth(d.key)}
+                    className={`border px-3 py-2.5 text-left ${
+                      on
+                        ? "border-accent bg-accent/[.06]"
+                        : "border-line bg-shade hover:border-ink"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-[12px] font-medium">
+                      <span
+                        className={`block h-[7px] w-[7px] ${on ? "bg-accent" : "bg-line"}`}
+                      />
+                      {d.title}
+                      {d.key === "deep" && (
+                        <span className="text-[10px] font-normal text-dim">默认</span>
+                      )}
+                    </span>
+                    <span className="mt-1 block text-[10px] leading-relaxed text-muted">
+                      {d.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {error && <div className="mt-3 text-xs text-danger">{error}</div>}
 
           <div className="mt-4 flex items-center gap-2 text-[11px] text-muted">
             <span className="block h-[5px] w-[5px] bg-accent" />
             录入后立即开始索引
+            {depth === "fast" && "（快速模式，稍后可在详情页生成深度理解）"}
           </div>
 
           <div className="mt-5 flex justify-end gap-[9px]">

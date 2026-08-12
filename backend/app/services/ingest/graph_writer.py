@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.graph.client import get_driver
 from app.services.ingest.api_matcher import ApiEdge
 from app.services.ingest.chunker import CodeChunk
+from app.services.ingest.summarizer import FAILED_PREFIX, FAST_PREFIX
 
 _store: Neo4jPropertyGraphStore | None = None
 
@@ -176,18 +177,21 @@ async def load_summary_cache(project_id: str) -> tuple[dict[str, str], dict[str,
     file_cache: dict[str, str] = {}
     module_cache: dict[str, str] = {}
     async with driver.session() as session:
+        # 失败占位与 fast 模式占位都不进缓存：前者要重试，后者要在 deep 补跑时被替换
         result = await session.run(
             "MATCH (f:File {project_id: $pid}) "
-            "WHERE f.summary IS NOT NULL AND f.summary <> '' AND NOT f.summary STARTS WITH '（摘要生成失败' "
+            "WHERE f.summary IS NOT NULL AND f.summary <> '' "
+            "AND NOT f.summary STARTS WITH $failed AND NOT f.summary STARTS WITH $fast "
             "RETURN f.content_hash AS h, f.summary AS s",
-            pid=project_id,
+            pid=project_id, failed=FAILED_PREFIX, fast=FAST_PREFIX,
         )
         file_cache = {rec["h"]: rec["s"] async for rec in result}
         result = await session.run(
             "MATCH (m:Module {project_id: $pid}) "
             "WHERE m.summary IS NOT NULL AND m.summary <> '' AND m.agg_hash IS NOT NULL "
+            "AND NOT m.summary STARTS WITH $fast "
             "RETURN m.agg_hash AS h, m.summary AS s",
-            pid=project_id,
+            pid=project_id, fast=FAST_PREFIX,
         )
         module_cache = {rec["h"]: rec["s"] async for rec in result}
     return file_cache, module_cache

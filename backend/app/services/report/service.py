@@ -10,9 +10,14 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.db import SessionLocal
-from app.models.tables import UnderstandingReport
+from app.models.tables import IndexDepth, UnderstandingReport
 from app.services.report.builder import generate_doc, generate_sequences
-from app.services.report.graph_reader import read_graph_edges, read_project_tree
+from app.services.report.dataflow import build_dataflow
+from app.services.report.graph_reader import (
+    read_graph_edges,
+    read_module_edges,
+    read_project_tree,
+)
 from app.services.report.llm import report_llm
 from app.services.report.mindmap import build_mindmap
 
@@ -23,26 +28,55 @@ logger = logging.getLogger(__name__)
 class ReportResult:
     doc_markdown: str = ""
     mindmap_mermaid: str = ""
+    dataflow_mermaid: str = ""
     sequences: list[dict] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
 
 
-async def build_report(project_id: str, llm=None) -> ReportResult:
-    """读图生成三件套。思维导图程序化必成；文档与时序图各自独立降级。"""
+async def build_report(
+    project_id: str, llm=None, depth: str = IndexDepth.DEEP
+) -> ReportResult:
+    """读图生成报告四件。
+
+    程序化两件（顶层导图、数据流图）零 LLM、必定成功；
+    LLM 两件（需求文档、时序图）各自独立降级。fast 模式只产出程序化两件（M5 D7）。
+    """
     llm = llm or report_llm
     tree = await read_project_tree(project_id)
-    edges = await read_graph_edges(project_id)
 
     mindmap = build_mindmap(tree)
+    module_edges = await read_module_edges(project_id)
+    dataflow = build_dataflow(tree, module_edges)
+
+    if depth == IndexDepth.FAST:
+        return ReportResult(
+            doc_markdown="",
+            mindmap_mermaid=mindmap,
+            dataflow_mermaid=dataflow,
+            sequences=[],
+            stats={
+                "report_modules": len(tree.modules),
+                "report_depth": IndexDepth.FAST,
+                "dataflow_edges": len(module_edges),
+                "doc_fallback": False,
+                "sequences_ok": 0,
+                "sequences_fallback": 0,
+            },
+        )
+
+    edges = await read_graph_edges(project_id)
     doc, doc_fallback = await generate_doc(tree, llm)
     sequences, ok, fallback = await generate_sequences(tree, edges, llm)
 
     return ReportResult(
         doc_markdown=doc,
         mindmap_mermaid=mindmap,
+        dataflow_mermaid=dataflow,
         sequences=sequences,
         stats={
             "report_modules": len(tree.modules),
+            "report_depth": IndexDepth.DEEP,
+            "dataflow_edges": len(module_edges),
             "doc_fallback": doc_fallback,
             "sequences_ok": ok,
             "sequences_fallback": fallback,
@@ -63,15 +97,18 @@ async def upsert_report(project_id: uuid.UUID, result: ReportResult) -> None:
             session.add(report)
         report.doc_markdown = result.doc_markdown
         report.mindmap_mermaid = result.mindmap_mermaid
+        report.dataflow_mermaid = result.dataflow_mermaid
         report.sequences_json = result.sequences
         report.generated_at = datetime.now(timezone.utc)
         await session.commit()
 
 
-async def generate_and_store_report(project_id: uuid.UUID, llm=None) -> dict:
+async def generate_and_store_report(
+    project_id: uuid.UUID, llm=None, depth: str = IndexDepth.DEEP
+) -> dict:
     """pipeline report 阶段入口：返回 stats（含 partial 标记），自身不抛异常。"""
     try:
-        result = await build_report(str(project_id), llm=llm)
+        result = await build_report(str(project_id), llm=llm, depth=depth)
         await upsert_report(project_id, result)
         stats = dict(result.stats)
         stats["report_ok"] = True

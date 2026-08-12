@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import CopyButton from "@/components/CopyButton";
 import StageBar from "@/components/StageBar";
@@ -14,6 +14,7 @@ import {
   Project,
   UnderstandingReport,
 } from "@/lib/api";
+import { buildModuleMindmap, MODULE_MINDMAP_FILE_LIMIT } from "@/lib/mermaid";
 import {
   formatDateTime,
   formatDuration,
@@ -65,6 +66,9 @@ export default function ProjectDetailPage({
   const [mock, setMock] = useState(false);
   /** 索引由「进行中」跃迁为结束时自增，驱动报告/模块页签重新拉取。 */
   const [reloadKey, setReloadKey] = useState(0);
+  /** 模块地图提到父组件：功能地图页签与项目理解页签的子导图共用同一份数据。 */
+  const [modules, setModules] = useState<ModuleInfo[] | null>(null);
+  const [modulesError, setModulesError] = useState("");
 
   // 初始页签支持 ?tab=（聊天页 SOURCES 卡片链到 ?tab=modules）
   useEffect(() => {
@@ -115,16 +119,63 @@ export default function ProjectDetailPage({
     };
   }, [projectId]);
 
-  const reindex = useCallback(async () => {
-    setError("");
-    setNotice("");
-    try {
-      await api(`/projects/${projectId}/index`, { method: "POST" });
-      setNotice("已触发重新索引，完成后本页自动刷新报告。");
-    } catch (e) {
-      setError((e as Error).message);
+  useEffect(() => {
+    let stopped = false;
+    if (mock) {
+      setModules(MOCK_MODULES.modules);
+      return;
     }
-  }, [projectId]);
+    setModules(null);
+    setModulesError("");
+    api<ModuleMap>(`/projects/${projectId}/modules`)
+      .then((m) => {
+        if (!stopped) setModules(m.modules ?? []);
+      })
+      .catch((e) => {
+        if (!stopped) setModulesError((e as Error).message);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [projectId, mock, reloadKey]);
+
+  const runIndex = useCallback(
+    async (query: string, message: string) => {
+      setError("");
+      setNotice("");
+      try {
+        await api(`/projects/${projectId}/index${query}`, { method: "POST" });
+        setNotice(message);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [projectId]
+  );
+
+  const isFast = project?.index_depth === "fast";
+
+  /** 重新索引保持当前深度，不让 fast 项目意外产生 LLM 成本。 */
+  const reindex = useCallback(
+    () =>
+      runIndex(
+        isFast ? "?depth=fast" : "",
+        isFast
+          ? "已触发重新索引（保持快速模式）。"
+          : "已触发重新索引，完成后本页自动刷新报告。"
+      ),
+    [runIndex, isFast]
+  );
+
+  /** fast → deep 补跑：代码没变时摘要与向量全走缓存，只补 LLM 摘要与报告。 */
+  const deepen = useCallback(
+    () =>
+      runIndex(
+        "?depth=deep&mode=auto",
+        "已开始生成深度理解，完成后本页自动刷新报告。"
+      ),
+    [runIndex]
+  );
 
   if (missing) {
     return (
@@ -156,13 +207,23 @@ export default function ProjectDetailPage({
           <div className="break-words text-[17px] font-semibold leading-tight">
             {project?.name ?? "…"}
           </div>
-          {badge && (
-            <span
-              className={`w-fit border px-2 py-[3px] text-[10px] tracking-wide ${badge.cls}`}
-            >
-              {badge.glyph} {badge.label}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {badge && (
+              <span
+                className={`w-fit border px-2 py-[3px] text-[10px] tracking-wide ${badge.cls}`}
+              >
+                {badge.glyph} {badge.label}
+              </span>
+            )}
+            {isFast && (
+              <span
+                className="w-fit border border-line px-2 py-[3px] text-[10px] tracking-wide text-ink2"
+                title="快速模式索引：零 AI 成本，未生成深度理解"
+              >
+                FAST
+              </span>
+            )}
+          </div>
         </div>
 
         <dl className="flex flex-col gap-3 text-[11px]">
@@ -193,12 +254,21 @@ export default function ProjectDetailPage({
           >
             聊天
           </a>
+          {isFast && (
+            <button
+              onClick={deepen}
+              disabled={indexing}
+              className="border border-accent bg-accent/[.06] px-3 py-2 text-[11px] font-medium tracking-wide text-accent hover:bg-accent/[.12] disabled:opacity-40"
+            >
+              生成深度理解
+            </button>
+          )}
           <button
             onClick={reindex}
             disabled={indexing}
             className="border border-line px-3 py-2 text-[11px] tracking-wide text-muted hover:border-ink hover:text-ink disabled:opacity-40"
           >
-            {indexing ? "索引中…" : "⟳ 重新索引"}
+            {indexing ? "索引中…" : isFast ? "⟳ 重新索引 (fast)" : "⟳ 重新索引"}
           </button>
         </div>
 
@@ -230,6 +300,11 @@ export default function ProjectDetailPage({
               {badge.glyph} {badge.label}
             </span>
           )}
+          {isFast && (
+            <span className="border border-line px-2 py-[3px] text-[10px] tracking-wide text-ink2">
+              FAST
+            </span>
+          )}
           <a
             href={`/projects/${projectId}/chat`}
             className={`ml-auto px-3 py-1.5 text-[11px] tracking-wide ${
@@ -240,12 +315,21 @@ export default function ProjectDetailPage({
           >
             聊天
           </a>
+          {isFast && (
+            <button
+              onClick={deepen}
+              disabled={indexing}
+              className="border border-accent bg-accent/[.06] px-3 py-1.5 text-[11px] font-medium tracking-wide text-accent hover:bg-accent/[.12] disabled:opacity-40"
+            >
+              生成深度理解
+            </button>
+          )}
           <button
             onClick={reindex}
             disabled={indexing}
             className="border border-line px-3 py-1.5 text-[11px] tracking-wide text-muted hover:border-ink hover:text-ink disabled:opacity-40"
           >
-            {indexing ? "索引中…" : "⟳ 重新索引"}
+            {indexing ? "索引中…" : isFast ? "⟳ 重新索引 (fast)" : "⟳ 重新索引"}
           </button>
         </div>
 
@@ -294,11 +378,13 @@ export default function ProjectDetailPage({
               mock={mock}
               reloadKey={reloadKey}
               indexing={!!indexing}
+              modules={modules}
               onReindex={reindex}
+              onDeepen={deepen}
             />
           )}
           {tab === "modules" && (
-            <ModulesTab projectId={projectId} mock={mock} reloadKey={reloadKey} />
+            <ModulesTab modules={modules} error={modulesError} />
           )}
           {tab === "jobs" && <JobsTab projectId={projectId} mock={mock} />}
         </div>
@@ -335,19 +421,27 @@ function SectionLabel({ text, extra }: { text: string; extra?: string }) {
   );
 }
 
-/** 页签一：项目理解（需求逻辑文档 + 思维导图 + 核心流程时序图）。 */
+/**
+ * 页签一：项目理解。
+ * M5 起为四件套：需求文档 + 顶层导图（Project→Module）+ 模块数据流图 + 时序图，
+ * 外加模块子导图——由已加载的模块地图数据在前端即时拼装，不发额外请求。
+ */
 function UnderstandingTab({
   projectId,
   mock,
   reloadKey,
   indexing,
+  modules,
   onReindex,
+  onDeepen,
 }: {
   projectId: string;
   mock: boolean;
   reloadKey: number;
   indexing: boolean;
+  modules: ModuleInfo[] | null;
   onReindex: () => void;
+  onDeepen: () => void;
 }) {
   const [report, setReport] = useState<UnderstandingReport | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "empty" | "error">("loading");
@@ -407,11 +501,33 @@ function UnderstandingTab({
     );
   }
 
+  const reportIsFast = report.depth === "fast";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="text-[10px] tracking-wide text-faint">
         GENERATED {formatDateTime(report.generated_at)}
+        {report.depth ? ` · DEPTH ${report.depth.toUpperCase()}` : ""}
       </div>
+
+      {reportIsFast && (
+        <div className="flex flex-wrap items-center gap-3 border border-line bg-shade px-4 py-3">
+          <span className="border border-line bg-panel px-2 py-[3px] text-[10px] tracking-wide text-ink2">
+            FAST
+          </span>
+          <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted">
+            快速模式产物：只有结构类图与代码检索，没有 AI 生成的需求文档与时序图。
+            生成深度理解会复用已有的解析与向量缓存，只补 AI 部分。
+          </span>
+          <button
+            onClick={onDeepen}
+            disabled={indexing}
+            className="border border-accent bg-accent/[.06] px-3 py-1.5 text-[11px] font-medium tracking-wide text-accent hover:bg-accent/[.12] disabled:opacity-40"
+          >
+            {indexing ? "索引中…" : "生成深度理解"}
+          </button>
+        </div>
+      )}
 
       <section className="flex flex-col gap-2.5">
         <SectionLabel text="REQUIREMENT DOC 需求逻辑文档" />
@@ -430,8 +546,10 @@ function UnderstandingTab({
                 <ReactMarkdown>{report.doc_markdown}</ReactMarkdown>
               </div>
             ) : (
-              <div className="py-8 text-center text-[11px] tracking-wide text-faint">
-                文档内容为空
+              <div className="py-8 text-center text-[11px] leading-relaxed text-faint">
+                {reportIsFast
+                  ? "快速模式不生成需求文档，点上方「生成深度理解」即可补齐"
+                  : "文档内容为空"}
               </div>
             )}
           </div>
@@ -441,11 +559,23 @@ function UnderstandingTab({
       <section className="flex flex-col gap-2.5">
         <SectionLabel text="MINDMAP 功能思维导图" />
         <MermaidDiagram
-          title="功能思维导图"
-          subtitle="由图谱中的 模块 → 文件 结构程序化生成"
+          title="功能思维导图（模块级）"
+          subtitle="由图谱中的 项目 → 模块 结构程序化生成"
           code={report.mindmap_mermaid || ""}
         />
+        <ModuleMindmap modules={modules} />
       </section>
+
+      {report.dataflow_mermaid?.trim() && (
+        <section className="flex flex-col gap-2.5">
+          <SectionLabel text="DATAFLOW 模块数据流图" />
+          <MermaidDiagram
+            title="模块数据流图"
+            subtitle="模块间接口调用（实线）与跨模块引用（虚线）聚合，边标注为调用次数"
+            code={report.dataflow_mermaid}
+          />
+        </section>
+      )}
 
       <section className="flex flex-col gap-2.5">
         <SectionLabel
@@ -465,8 +595,10 @@ function UnderstandingTab({
             ))}
           </div>
         ) : (
-          <div className="border border-dashed border-line py-10 text-center text-[11px] text-faint">
-            本次索引没有产出时序图（可能没有满足条件的核心模块）
+          <div className="border border-dashed border-line py-10 text-center text-[11px] leading-relaxed text-faint">
+            {reportIsFast
+              ? "快速模式不生成时序图，点上方「生成深度理解」即可补齐"
+              : "本次索引没有产出时序图（可能没有满足条件的核心模块）"}
           </div>
         )}
       </section>
@@ -474,39 +606,140 @@ function UnderstandingTab({
   );
 }
 
+const moduleKey = (m: ModuleInfo) => `${m.kind}:${m.name}`;
+
+/**
+ * 模块子导图（M5 D1）：顶层导图只画到模块，文件层在这里按需展开。
+ * mermaid 串由 lib/mermaid.ts 用已加载的模块地图数据本地拼装，点击不发请求。
+ */
+function ModuleMindmap({ modules }: { modules: ModuleInfo[] | null }) {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const sorted = useMemo(() => {
+    if (!modules) return [];
+    const order = new Map<string, number>(
+      MODULE_KIND_ORDER.map((k, i) => [k as string, i])
+    );
+    return [...modules].sort(
+      (a, b) =>
+        (order.get(a.kind) ?? 99) - (order.get(b.kind) ?? 99) ||
+        (b.files?.length ?? 0) - (a.files?.length ?? 0) ||
+        a.name.localeCompare(b.name, "zh")
+    );
+  }, [modules]);
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        (m.route_prefix ?? "").toLowerCase().includes(q)
+    );
+  }, [sorted, query]);
+
+  const selected = useMemo(
+    () => sorted.find((m) => moduleKey(m) === selectedKey) ?? null,
+    [sorted, selectedKey]
+  );
+  const code = useMemo(
+    () => (selected ? buildModuleMindmap(selected) : ""),
+    [selected]
+  );
+
+  if (!modules) {
+    return (
+      <div className="border border-line bg-panel px-4 py-6 text-center text-[11px] tracking-wide text-faint">
+        LOADING MODULES…
+      </div>
+    );
+  }
+  if (modules.length === 0) return null;
+
+  return (
+    <div className="border border-line bg-panel">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-shade px-4 py-2.5">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-medium">模块子导图</div>
+          <div className="text-[10px] tracking-wide text-dim">
+            点击模块查看其文件结构 · 本地渲染，不产生后端请求
+          </div>
+        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="筛选模块…"
+          aria-label="筛选模块"
+          className="ml-auto w-[150px] border border-line bg-panel px-2 py-1 text-[11px] placeholder:text-faint"
+        />
+      </div>
+
+      <div className="flex max-h-[152px] flex-wrap content-start gap-1.5 overflow-y-auto border-b border-hair p-3">
+        {shown.length === 0 ? (
+          <span className="px-1 py-2 text-[11px] text-faint">没有匹配的模块</span>
+        ) : (
+          shown.map((m) => {
+            const key = moduleKey(m);
+            const on = key === selectedKey;
+            const meta = moduleKindMeta(m.kind);
+            return (
+              <button
+                key={key}
+                onClick={() => setSelectedKey(on ? null : key)}
+                aria-pressed={on}
+                title={`${meta.label} · ${m.files?.length ?? 0} 个文件`}
+                className={`border px-2 py-1 text-[11px] ${
+                  on
+                    ? "border-accent bg-accent/[.08] text-accent"
+                    : "border-line text-muted hover:border-ink hover:text-ink"
+                }`}
+              >
+                {m.name}
+                <span className={on ? "text-accent/70" : "text-faint"}>
+                  {" "}
+                  {m.files?.length ?? 0}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      {selected ? (
+        <div className="p-3">
+          <MermaidDiagram
+            title={selected.name}
+            subtitle={[
+              moduleKindMeta(selected.kind).label,
+              selected.route_prefix,
+              `${selected.files?.length ?? 0} 个文件`,
+              (selected.files?.length ?? 0) > MODULE_MINDMAP_FILE_LIMIT
+                ? `图中只画前 ${MODULE_MINDMAP_FILE_LIMIT} 个`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            code={code}
+          />
+        </div>
+      ) : (
+        <div className="px-4 py-8 text-center text-[11px] text-faint">
+          选择上方任一模块，展开它的文件子导图
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 页签二：功能地图（模块按 kind 分组，展开看文件与 L2 摘要）。 */
 function ModulesTab({
-  projectId,
-  mock,
-  reloadKey,
+  modules,
+  error,
 }: {
-  projectId: string;
-  mock: boolean;
-  reloadKey: number;
+  modules: ModuleInfo[] | null;
+  error: string;
 }) {
-  const [modules, setModules] = useState<ModuleInfo[] | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let stopped = false;
-    if (mock) {
-      setModules(MOCK_MODULES.modules);
-      return;
-    }
-    setModules(null);
-    setError("");
-    api<ModuleMap>(`/projects/${projectId}/modules`)
-      .then((m) => {
-        if (!stopped) setModules(m.modules ?? []);
-      })
-      .catch((e) => {
-        if (!stopped) setError((e as Error).message);
-      });
-    return () => {
-      stopped = true;
-    };
-  }, [projectId, mock, reloadKey]);
-
   if (error) return <ErrorCard message={error} />;
   if (!modules) return <Loading text="LOADING MODULES…" />;
   if (modules.length === 0) {

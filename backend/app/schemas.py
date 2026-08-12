@@ -20,6 +20,7 @@ class ProjectOut(BaseModel):
     git_url: str
     default_branch: str | None
     status: str
+    index_depth: str = "deep"
     last_indexed_commit: str | None
     created_at: datetime
     updated_at: datetime
@@ -52,12 +53,14 @@ class SequenceOut(BaseModel):
 
 
 class ReportOut(BaseModel):
-    """理解报告三件套（设计 D3）。"""
+    """理解报告四件（M5）。dataflow_mermaid 为空表示旧报告，前端隐藏该卡片。"""
 
     project_id: uuid.UUID
     doc_markdown: str
     mindmap_mermaid: str
+    dataflow_mermaid: str = ""
     sequences: list[SequenceOut]
+    depth: str = "deep"  # fast 报告只有程序化两件，前端据此显示升级引导
     generated_at: datetime
 
 

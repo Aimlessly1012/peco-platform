@@ -38,6 +38,13 @@ class JobStage:
     REPORT = "report"
 
 
+class IndexDepth:
+    """索引深度（M5 D7）。fast = 零 LLM 录入，deep = 完整理解。"""
+
+    DEEP = "deep"
+    FAST = "fast"
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -47,6 +54,7 @@ class Project(Base):
     git_token_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
     default_branch: Mapped[str | None] = mapped_column(String(100), default=None)
     status: Mapped[str] = mapped_column(String(20), default=ProjectStatus.PENDING)
+    index_depth: Mapped[str] = mapped_column(String(10), default=IndexDepth.DEEP)
     last_indexed_commit: Mapped[str | None] = mapped_column(String(40), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -99,6 +107,8 @@ class UnderstandingReport(Base):
     )
     doc_markdown: Mapped[str] = mapped_column(Text, default="")
     mindmap_mermaid: Mapped[str] = mapped_column(Text, default="")
+    # M5：模块数据流图。旧报告为 NULL，前端据此隐藏卡片
+    dataflow_mermaid: Mapped[str | None] = mapped_column(Text, default=None)
     sequences_json: Mapped[list] = mapped_column(JSON, default=list)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

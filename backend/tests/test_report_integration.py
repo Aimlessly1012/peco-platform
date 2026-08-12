@@ -11,10 +11,12 @@ import pytest
 
 from app.graph.client import close_driver, delete_project_graph, ensure_vector_index
 from app.services.report.builder import select_core_modules
+from app.services.report.dataflow import build_dataflow
 from app.services.report.graph_reader import (
     read_file_detail,
     read_graph_edges,
     read_impact,
+    read_module_edges,
     read_project_stats,
     read_project_tree,
     resolve_symbol_files,
@@ -152,15 +154,16 @@ async def test_project_isolation(indexed_project, fake_embedder, fake_summarizer
 
 
 async def test_build_report_end_to_end(indexed_project):
-    """读真实图 → 三件套：导图程序化必成，文档与时序图走 mock LLM。"""
+    """读真实图 → 报告四件：导图与数据流图程序化必成，文档与时序图走 mock LLM。"""
     pid, _, _ = indexed_project
     tree = await read_project_tree(pid)
     core = select_core_modules(tree)
-    llm = FakeLLM(doc_returns="# mini-shop 需求逻辑文档\n正文", seq_returns=[GOOD_SEQ] * len(core))
+    llm = FakeLLM(chapter_returns="### 章节\n正文", seq_returns=[GOOD_SEQ] * len(core))
 
     result = await build_report(pid, llm=llm)
 
     assert result.mindmap_mermaid.startswith("mindmap")
+    assert result.dataflow_mermaid.startswith("flowchart LR")
     assert result.doc_markdown.startswith("# mini-shop")
     assert result.stats["report_modules"] == len(tree.modules)
     assert result.stats["sequences_ok"] == len(core)
@@ -168,3 +171,43 @@ async def test_build_report_end_to_end(indexed_project):
     for seq in result.sequences:
         assert seq["module_key"] in {m.key for m in tree.modules}
         assert seq["mermaid"].startswith("sequenceDiagram")
+
+
+async def test_dataflow_matches_graph_relations(indexed_project):
+    """M5 spec 场景: 数据流图每条边都对应图中真实的模块间聚合关系。"""
+    pid, _, _ = indexed_project
+    tree = await read_project_tree(pid)
+    module_edges = await read_module_edges(pid)
+
+    assert module_edges, "mini_repo 有跨模块的 CALLS_API/IMPORTS"
+    real_keys = {m.key for m in tree.modules}
+    for edge in module_edges:
+        assert edge.src_key in real_keys
+        assert edge.dst_key in real_keys
+        assert edge.src_key != edge.dst_key    # 只聚合跨模块关系
+        assert edge.count >= 1
+        assert edge.relation in ("calls_api", "imports")
+
+    dataflow = build_dataflow(tree, module_edges)
+    labels = [
+        line.split('["', 1)[1].rsplit('"]', 1)[0]
+        for line in dataflow.splitlines()
+        if '["' in line and "另有" not in line
+    ]
+    real_names = {m.name for m in tree.modules}
+    for label in labels:
+        assert label.split("] ", 1)[-1] in real_names, f"图中不存在的模块：{label}"
+
+
+async def test_fast_report_is_programmatic_only(indexed_project):
+    """fast 深度只产出导图与数据流图，且完全不碰 LLM。"""
+    pid, _, _ = indexed_project
+    llm = FakeLLM(chapter_returns="### 不该被调用", seq_returns=[GOOD_SEQ])
+
+    result = await build_report(pid, llm=llm, depth="fast")
+
+    assert result.mindmap_mermaid.startswith("mindmap")
+    assert result.dataflow_mermaid.startswith("flowchart LR")
+    assert result.doc_markdown == ""
+    assert result.sequences == []
+    assert llm.chapter_calls == [] and llm.seq_calls == []

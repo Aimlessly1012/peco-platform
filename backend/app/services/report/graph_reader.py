@@ -63,6 +63,20 @@ class GraphEdges:
     import_edges: list[ImportEdgeInfo] = field(default_factory=list)
 
 
+@dataclass
+class ModuleEdge:
+    """模块间的聚合关系（数据流图用，M5 D2）。"""
+
+    src_key: str      # "kind:name" 唯一键
+    src_name: str
+    src_kind: str
+    dst_key: str
+    dst_name: str
+    dst_kind: str
+    relation: str     # calls_api | imports
+    count: int
+
+
 def _module_key_from_node(node_name: str) -> str:
     """节点名形如 "{project_id}:module:{kind}:{name}"，取 ":module:" 之后为唯一键。"""
     marker = ":module:"
@@ -153,6 +167,58 @@ async def read_graph_edges(project_id: str) -> GraphEdges:
             edges.import_edges.append(
                 ImportEdgeInfo(src=rec["src"] or "", dst=rec["dst"] or "")
             )
+    return edges
+
+
+async def read_module_edges(project_id: str) -> list[ModuleEdge]:
+    """模块间聚合关系（M5 D2）：跨模块 CALLS_API 与 IMPORTS 各自计数。
+
+    去重按端点对：文件可等距多归属于多个模块，不去重会把同一条依赖重复计数。
+    """
+    driver = get_driver()
+    edges: list[ModuleEdge] = []
+
+    def to_edge(rec, relation: str) -> ModuleEdge:
+        return ModuleEdge(
+            src_key=_module_key_from_node(rec["src_node"] or ""),
+            src_name=rec["src_name"] or "",
+            src_kind=rec["src_kind"] or "",
+            dst_key=_module_key_from_node(rec["dst_node"] or ""),
+            dst_name=rec["dst_name"] or "",
+            dst_kind=rec["dst_kind"] or "",
+            relation=relation,
+            count=rec["n"] or 0,
+        )
+
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (ms:Module {project_id: $pid})-[:CONTAINS]->(:File)
+                  -[:DEFINES]->(sc:Chunk)-[:CALLS_API]->(tc:Chunk)
+                  <-[:DEFINES]-(:File)<-[:CONTAINS]-(mt:Module {project_id: $pid})
+            WHERE ms.name <> mt.name
+            RETURN ms.name AS src_node, ms.module_name AS src_name, ms.kind AS src_kind,
+                   mt.name AS dst_node, mt.module_name AS dst_name, mt.kind AS dst_kind,
+                   count(DISTINCT [sc.name, tc.name]) AS n
+            ORDER BY n DESC
+            """,
+            pid=project_id,
+        )
+        edges.extend([to_edge(rec, "calls_api") async for rec in result])
+
+        result = await session.run(
+            """
+            MATCH (ms:Module {project_id: $pid})-[:CONTAINS]->(sf:File)
+                  -[:IMPORTS]->(tf:File)<-[:CONTAINS]-(mt:Module {project_id: $pid})
+            WHERE ms.name <> mt.name
+            RETURN ms.name AS src_node, ms.module_name AS src_name, ms.kind AS src_kind,
+                   mt.name AS dst_node, mt.module_name AS dst_name, mt.kind AS dst_kind,
+                   count(DISTINCT [sf.path, tf.path]) AS n
+            ORDER BY n DESC
+            """,
+            pid=project_id,
+        )
+        edges.extend([to_edge(rec, "imports") async for rec in result])
     return edges
 
 

@@ -4,9 +4,9 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from app.models.tables import Project, UnderstandingReport
+from app.models.tables import IndexDepth, Project, UnderstandingReport
 from app.services.ingest.pipeline import partial_reason
-from app.services.report.graph_reader import GraphEdges, ProjectTree
+from app.services.report.graph_reader import GraphEdges, ModuleEdge, ProjectTree
 from app.services.report.service import generate_and_store_report
 from tests.test_report import GOOD_SEQ, FakeLLM, make_edges, make_tree
 
@@ -14,7 +14,17 @@ from tests.test_report import GOOD_SEQ, FakeLLM, make_edges, make_tree
 @pytest.fixture
 def stub_graph(monkeypatch):
     """打桩图读取，使报告编排无需 Neo4j。"""
-    state = {"tree": make_tree(), "edges": make_edges()}
+    state = {
+        "tree": make_tree(),
+        "edges": make_edges(),
+        "module_edges": [
+            ModuleEdge(
+                src_key="page:orders", src_name="orders", src_kind="page",
+                dst_key="api:orders", dst_name="orders", dst_kind="api",
+                relation="calls_api", count=3,
+            )
+        ],
+    }
 
     async def fake_tree(project_id: str):
         if isinstance(state["tree"], Exception):
@@ -24,8 +34,12 @@ def stub_graph(monkeypatch):
     async def fake_edges(project_id: str):
         return state["edges"]
 
+    async def fake_module_edges(project_id: str):
+        return state["module_edges"]
+
     monkeypatch.setattr("app.services.report.service.read_project_tree", fake_tree)
     monkeypatch.setattr("app.services.report.service.read_graph_edges", fake_edges)
+    monkeypatch.setattr("app.services.report.service.read_module_edges", fake_module_edges)
     return state
 
 
@@ -45,10 +59,10 @@ async def _load_report(test_db, pid) -> UnderstandingReport | None:
         )
 
 
-async def test_generate_and_store_writes_triplet(test_db, stub_graph):
-    """spec 场景: 索引完成自动产出报告——三件套齐全且至少一张时序图。"""
+async def test_generate_and_store_writes_all_four(test_db, stub_graph):
+    """M5 spec 场景: deep 索引产出报告四件（文档/导图/数据流图/时序图）。"""
     pid = await _new_project(test_db)
-    llm = FakeLLM(doc_returns="# 文档\n正文", seq_returns=[GOOD_SEQ, GOOD_SEQ])
+    llm = FakeLLM(chapter_returns="### 章节\n正文", seq_returns=[GOOD_SEQ, GOOD_SEQ])
 
     stats = await generate_and_store_report(pid, llm=llm)
 
@@ -56,18 +70,40 @@ async def test_generate_and_store_writes_triplet(test_db, stub_graph):
     assert stats["report_partial"] is False
     assert (stats["sequences_ok"], stats["sequences_fallback"]) == (2, 0)
     assert stats["report_modules"] == 4
+    assert stats["report_depth"] == IndexDepth.DEEP
+    assert stats["dataflow_edges"] == 1
 
     report = await _load_report(test_db, pid)
-    assert report.doc_markdown == "# 文档\n正文"
+    assert report.doc_markdown.startswith("# mini-shop 需求逻辑文档")
+    assert "### 章节" in report.doc_markdown
     assert report.mindmap_mermaid.startswith("mindmap")
+    assert report.dataflow_mermaid.startswith("flowchart LR")
     assert len(report.sequences_json) == 2
     assert all(s["mermaid"] for s in report.sequences_json)
+
+
+async def test_fast_depth_produces_only_programmatic_artifacts(test_db, stub_graph):
+    """M5 spec: fast 报告只有程序化两件，且不调 LLM。"""
+    pid = await _new_project(test_db)
+    llm = FakeLLM(chapter_returns="### 不该被调用", seq_returns=[GOOD_SEQ])
+
+    stats = await generate_and_store_report(pid, llm=llm, depth=IndexDepth.FAST)
+
+    assert stats["report_ok"] is True
+    assert stats["report_depth"] == IndexDepth.FAST
+    assert llm.chapter_calls == [] and llm.seq_calls == [] and llm.overview_calls == []
+
+    report = await _load_report(test_db, pid)
+    assert report.mindmap_mermaid.startswith("mindmap")
+    assert report.dataflow_mermaid.startswith("flowchart LR")
+    assert report.doc_markdown == ""
+    assert report.sequences_json == []
 
 
 async def test_partial_when_sequence_falls_back(test_db, stub_graph):
     """单张时序图两次失败 → 记 fallback，任务标 partial（但报告仍写入）。"""
     pid = await _new_project(test_db)
-    llm = FakeLLM(doc_returns="# 文档", seq_returns=[GOOD_SEQ, "非法", "仍非法"])
+    llm = FakeLLM(chapter_returns="### 章节", seq_returns=[GOOD_SEQ, "非法", "仍非法"])
 
     stats = await generate_and_store_report(pid, llm=llm)
 
@@ -82,7 +118,7 @@ async def test_partial_when_sequence_falls_back(test_db, stub_graph):
 
 async def test_doc_fallback_marks_partial(test_db, stub_graph):
     pid = await _new_project(test_db)
-    llm = FakeLLM(doc_returns=None, seq_returns=[GOOD_SEQ, GOOD_SEQ])
+    llm = FakeLLM(chapter_returns=None, seq_returns=[GOOD_SEQ, GOOD_SEQ])
 
     stats = await generate_and_store_report(pid, llm=llm)
 
@@ -110,12 +146,12 @@ async def test_upsert_overwrites_single_row(test_db, stub_graph):
     """设计 D3: 一项目一行，重索引覆盖写。"""
     pid = await _new_project(test_db)
     await generate_and_store_report(
-        pid, llm=FakeLLM(doc_returns="# 第一版", seq_returns=[GOOD_SEQ, GOOD_SEQ])
+        pid, llm=FakeLLM(chapter_returns="### 第一版", seq_returns=[GOOD_SEQ, GOOD_SEQ])
     )
     first = await _load_report(test_db, pid)
 
     await generate_and_store_report(
-        pid, llm=FakeLLM(doc_returns="# 第二版", seq_returns=[GOOD_SEQ, GOOD_SEQ])
+        pid, llm=FakeLLM(chapter_returns="### 第二版", seq_returns=[GOOD_SEQ, GOOD_SEQ])
     )
 
     async with test_db() as session:
@@ -127,7 +163,8 @@ async def test_upsert_overwrites_single_row(test_db, stub_graph):
     assert count == 1
     second = await _load_report(test_db, pid)
     assert second.id == first.id  # 同一行被覆盖，不是删旧建新
-    assert second.doc_markdown == "# 第二版"
+    assert "### 第二版" in second.doc_markdown
+    assert "### 第一版" not in second.doc_markdown
 
 
 async def test_empty_graph_still_produces_report(test_db, stub_graph):
@@ -136,7 +173,7 @@ async def test_empty_graph_still_produces_report(test_db, stub_graph):
     stub_graph["tree"] = ProjectTree(project_id=str(pid), name="空项目")
     stub_graph["edges"] = GraphEdges()
 
-    stats = await generate_and_store_report(pid, llm=FakeLLM(doc_returns="# 空"))
+    stats = await generate_and_store_report(pid, llm=FakeLLM(chapter_returns="### 空"))
 
     assert stats["report_ok"] is True
     assert (stats["sequences_ok"], stats["sequences_fallback"]) == (0, 0)

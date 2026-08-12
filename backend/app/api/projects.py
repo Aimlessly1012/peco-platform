@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.crypto import encrypt_token
 from app.core.db import get_session
 from app.graph.client import delete_project_graph
-from app.models.tables import IndexJob, Project, UnderstandingReport
+from app.models.tables import IndexDepth, IndexJob, Project, UnderstandingReport
 from app.schemas import (
     IndexJobOut,
     ModuleMapOut,
@@ -18,7 +18,12 @@ from app.schemas import (
     ProjectOut,
     ReportOut,
 )
-from app.services.ingest.pipeline import MODE_AUTO, VALID_MODES, start_index_job
+from app.services.ingest.pipeline import (
+    MODE_AUTO,
+    VALID_DEPTHS,
+    VALID_MODES,
+    start_index_job,
+)
 from app.services.report.graph_reader import read_project_tree
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -81,13 +86,19 @@ async def trigger_index(
         MODE_AUTO,
         description="auto=有基准 commit 时增量（默认），full=强制全量重建",
     ),
+    depth: str = Query(
+        IndexDepth.DEEP,
+        description="deep=完整理解（默认），fast=零 LLM 快速录入",
+    ),
     session: AsyncSession = Depends(get_session),
 ):
-    """M4：默认 auto（可增量）。实际执行路径由管道判定并写回任务 kind。"""
+    """M4：默认 auto（可增量）。M5：depth 控制理解深度，实际路径写回任务 kind 与项目 index_depth。"""
     if mode not in VALID_MODES:
         raise HTTPException(422, f"mode 仅支持 {' / '.join(VALID_MODES)}")
+    if depth not in VALID_DEPTHS:
+        raise HTTPException(422, f"depth 仅支持 {' / '.join(VALID_DEPTHS)}")
     await _get_project_or_404(project_id, session)
-    job = await start_index_job(project_id, mode)
+    job = await start_index_job(project_id, mode, depth)
     if job is None:
         raise HTTPException(409, "该项目已有索引任务在运行")
     return job
@@ -122,7 +133,10 @@ async def get_report(
         project_id=report.project_id,
         doc_markdown=report.doc_markdown,
         mindmap_mermaid=report.mindmap_mermaid,
+        dataflow_mermaid=report.dataflow_mermaid or "",
         sequences=report.sequences_json or [],
+        # 没有文档正文即 fast 产物（程序化两件）——前端据此显示「生成深度理解」
+        depth=IndexDepth.FAST if not report.doc_markdown else IndexDepth.DEEP,
         generated_at=report.generated_at,
     )
 

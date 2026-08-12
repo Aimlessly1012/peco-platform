@@ -104,7 +104,7 @@ async def indexing_env(tmp_path, test_db, fake_embedder, fake_summarizer, monkey
     await ensure_vector_index()
     monkeypatch.setattr(settings, "repos_dir", tmp_path / "repos")
 
-    async def fake_report(project_id, llm=None):
+    async def fake_report(project_id, llm=None, depth="deep"):
         return {"report_ok": True, "report_partial": False,
                 "sequences_ok": 0, "sequences_fallback": 0}
 

@@ -11,6 +11,18 @@ export function isMockMode(): boolean {
 
 export const MOCK_REPORT: UnderstandingReport = {
   generated_at: new Date().toISOString(),
+  depth: "deep",
+  dataflow_mermaid: [
+    "flowchart LR",
+    '  checkout["下单页 (page)"]',
+    '  orders["订单模块 (api)"]',
+    '  products["商品模块 (api)"]',
+    '  shared["公共工具 (shared)"]',
+    "  checkout -->|x6| orders",
+    "  orders -->|x3| products",
+    "  orders -.->|x4| shared",
+    "  checkout -.->|x2| shared",
+  ].join("\n"),
   doc_markdown: [
     "## 项目总览",
     "",
@@ -74,6 +86,11 @@ export const MOCK_MODULES: ModuleMap = {
       files: [
         { path: "app/checkout/page.tsx", summary: "下单页组件，表单校验后提交订单。" },
         { path: "app/checkout/hooks.ts", summary: "下单页数据获取与提交 hook。" },
+        // 故意留一条含括号/方括号/引号的路径，用来验证子导图的 mermaid 转义
+        {
+          path: 'app/(dashboard)/[id]/"quoted"/page.tsx',
+          summary: "路由组 + 动态段的页面，检验子导图节点转义。",
+        },
       ],
     },
     {

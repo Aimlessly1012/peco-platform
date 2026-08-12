@@ -1,6 +1,9 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8001";
 
+/** 索引深度（M5）：deep 走 LLM 全量理解，fast 只做结构与代码检索。 */
+export type IndexDepth = "deep" | "fast";
+
 export interface Project {
   id: string;
   name: string;
@@ -8,6 +11,8 @@ export interface Project {
   default_branch: string | null;
   status: "pending" | "indexing" | "ready" | "failed";
   last_indexed_commit: string | null;
+  /** M5 新增：最近一次索引的深度。旧后端不返回该字段。 */
+  index_depth?: IndexDepth | null;
   created_at: string;
   updated_at: string;
 }
@@ -44,10 +49,19 @@ export interface SequenceDiagram {
   fallback_text: string | null;
 }
 
-/** GET /projects/{id}/report —— 理解报告三件套。404 表示尚未生成。 */
+/**
+ * GET /projects/{id}/report —— 理解报告。404 表示尚未生成。
+ *
+ * M5：mindmap 收窄为 Project→Module 两层（模块子导图由前端按需拼装），
+ * 新增模块数据流图与 depth 标记；两个新字段在旧报告上缺省，一律按可选处理。
+ */
 export interface UnderstandingReport {
   doc_markdown: string;
   mindmap_mermaid: string;
+  /** M5 新增：模块间数据流 flowchart。旧报告为空/缺省，前端隐藏该卡片。 */
+  dataflow_mermaid?: string | null;
+  /** M5 新增：产出该报告的索引深度。缺省按 deep 处理。 */
+  depth?: IndexDepth | null;
   sequences: SequenceDiagram[];
   generated_at: string;
 }

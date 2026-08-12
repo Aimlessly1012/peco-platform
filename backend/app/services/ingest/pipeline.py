@@ -21,7 +21,14 @@ from app.graph.client import (
     delete_modules_and_structural_edges,
     delete_project_graph,
 )
-from app.models.tables import IndexJob, JobStage, JobStatus, Project, ProjectStatus
+from app.models.tables import (
+    IndexDepth,
+    IndexJob,
+    JobStage,
+    JobStatus,
+    Project,
+    ProjectStatus,
+)
 from app.services.ingest.api_matcher import extract_api_edges
 from app.services.ingest.chunker import ChunkError, CodeChunk, chunk_file
 from app.services.ingest.deps_extractor import extract_imports
@@ -50,7 +57,15 @@ from app.services.ingest.module_mapper import (
 )
 from app.services.ingest.progress import BatchCounter, StageProgress, batch_count
 from app.services.ingest.router_parser import ModuleMap, parse_routes
-from app.services.ingest.summarizer import fallback_summary, module_agg_hash, summarizer
+from app.services.ingest.summarizer import (
+    fallback_summary,
+    fast_summary,
+    module_agg_hash,
+    rule_summary,
+    summarizer,
+    template_module_summary,
+    template_project_summary,
+)
 from app.services.ingest.walker import LANGUAGE_BY_EXT, walk_repo
 from app.services.report.service import generate_and_store_report
 
@@ -60,6 +75,7 @@ MODE_AUTO = "auto"
 MODE_FULL = "full"
 MODE_INCREMENTAL = "incremental"
 VALID_MODES = (MODE_AUTO, MODE_FULL)
+VALID_DEPTHS = (IndexDepth.DEEP, IndexDepth.FAST)
 
 
 def _hash16(text: str) -> str:
@@ -116,6 +132,7 @@ async def _update_job(job_id: uuid.UUID, **values) -> None:
 async def _finish(
     job_id: uuid.UUID, project_id: uuid.UUID,
     *, error: str | None = None, commit_sha: str | None = None,
+    depth: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
 
@@ -129,6 +146,8 @@ async def _finish(
             project.status = ProjectStatus.READY
             if commit_sha:
                 project.last_indexed_commit = commit_sha
+            if depth:
+                project.index_depth = depth  # 记录最近成功索引的深度（M5 D7）
         else:
             job.status = JobStatus.FAILED
             job.error_text = error
@@ -215,19 +234,23 @@ async def _summarize_all(
     readme: str,
     stats: dict,
     on_progress=None,
+    depth: str = IndexDepth.DEEP,
 ) -> tuple[dict[str, str], str, bool]:
     """生成 L2/L3/L4；返回 (module_name→L3, L4, partial)。L2 直接写入 files[].summary。
 
     on_progress(done, total)：口径为 L2 文件数 + L3 模块数 + 1 次 L4（M4 D6 子进度）。
+    depth=fast 时全程零 LLM：L2 走规则/符号清单，L3/L4 走模板（M5 D7）。
     """
     file_cache, module_cache = await load_summary_cache(project_id)
     chunks_by_file: dict[str, list[CodeChunk]] = {}
     for c in chunks:
         chunks_by_file.setdefault(c.file_path, []).append(c)
 
+    fast = depth == IndexDepth.FAST
     partial = False
     new_calls = 0
     cached_hits = 0
+    rule_hits = 0
     progress_total = len(files) + len(module_map.modules) + 1
     progress_done = 0
 
@@ -238,19 +261,34 @@ async def _summarize_all(
             await on_progress(progress_done, progress_total)
 
     async def l2_for(f: FileInfo) -> None:
-        nonlocal new_calls, cached_hits, partial
+        nonlocal new_calls, cached_hits, partial, rule_hits
         if f.content_hash in file_cache:
             f.summary = file_cache[f.content_hash]
             cached_hits += 1
             await bump()
             return
+
+        file_chunks = chunks_by_file.get(f.path, [])
+        # M5 D5：规则命中就不必花 LLM（测试/类型/barrel/常量/小文件）
+        ruled = rule_summary(f.path, file_chunks)
+        if ruled is not None:
+            f.summary = ruled
+            rule_hits += 1
+            await bump()
+            return
+        if fast:
+            # fast 模式不调 LLM：没命中规则的文件退符号清单，仍有文件级语义
+            f.summary = fast_summary(f.path, file_chunks)
+            rule_hits += 1
+            await bump()
+            return
+
         result = await summarizer.summarize_file(
-            f.path, imports.get(f.path, set()),
-            chunks_by_file.get(f.path, []), heads.get(f.path, ""),
+            f.path, imports.get(f.path, set()), file_chunks, heads.get(f.path, ""),
         )
         new_calls += 1
         if result is None:
-            f.summary = fallback_summary(f.path, chunks_by_file.get(f.path, []))
+            f.summary = fallback_summary(f.path, file_chunks)
             partial = True
         else:
             f.summary = result
@@ -272,6 +310,13 @@ async def _summarize_all(
             cached_hits += 1
             await bump()
             continue
+        if fast:
+            module_summaries[key] = template_module_summary(
+                mod.name, mod.kind, mod.route_prefix, [f.path for f in member_files]
+            )
+            rule_hits += 1
+            await bump()
+            continue
         file_summaries = {f.path: f.summary for f in member_files[:30]}
         result = await summarizer.summarize_module(
             mod.name, mod.kind, mod.route_prefix,
@@ -289,15 +334,20 @@ async def _summarize_all(
         await bump()
 
     # L4：项目总览（每次重算）
-    l4 = await summarizer.summarize_project(readme, module_map, module_summaries)
-    new_calls += 1
-    if l4 is None:
-        l4 = "（项目总览生成失败）模块列表：" + ", ".join(module_summaries)
-        partial = True
+    if fast:
+        l4 = template_project_summary(module_map)
+        rule_hits += 1
+    else:
+        l4 = await summarizer.summarize_project(readme, module_map, module_summaries)
+        new_calls += 1
+        if l4 is None:
+            l4 = "（项目总览生成失败）模块列表：" + ", ".join(module_summaries)
+            partial = True
     await bump()
 
     stats["summaries_new"] = new_calls
     stats["summaries_cached"] = cached_hits
+    stats["summaries_rule"] = rule_hits
     stats["_module_hashes"] = module_hashes
     return module_summaries, l4, partial
 
@@ -329,10 +379,18 @@ async def build_index_plan(
     last_indexed_commit: str | None,
     commit_sha: str,
     walk_files: list[Path],
+    depth: str = IndexDepth.DEEP,
+    current_depth: str = IndexDepth.DEEP,
 ) -> IndexPlan:
     """auto 判定（设计 D3）：有基准 commit + 本地 git 副本 + diff 可执行 + 图非空 → 增量。"""
     full = IndexPlan(mode=MODE_FULL, parse_paths=list(walk_files))
     if mode == MODE_FULL:
+        return full
+    # fast → deep 补跑必须走全量：新的 L2/L3 摘要要落到每个文件节点上，
+    # 而增量只重写变更文件的节点。全量的代价只是解析与图写入——
+    # 嵌入键没变、全部缓存命中，LLM 只补 fast 占位那部分（M5 spec：只补差价）
+    if depth == IndexDepth.DEEP and current_depth == IndexDepth.FAST:
+        full.fallback_reason = "depth_upgraded_to_deep"
         return full
     if not last_indexed_commit:
         full.fallback_reason = "首次索引（无基准 commit）"
@@ -406,7 +464,10 @@ def _restore_missing_imports(
 
 
 async def run_index_job(
-    job_id: uuid.UUID, project_id: uuid.UUID, mode: str = MODE_AUTO
+    job_id: uuid.UUID,
+    project_id: uuid.UUID,
+    mode: str = MODE_AUTO,
+    depth: str = IndexDepth.DEEP,
 ) -> None:
     pid = str(project_id)
     try:
@@ -416,6 +477,7 @@ async def run_index_job(
             name = project.name
             branch = project.default_branch
             last_indexed_commit = project.last_indexed_commit
+            current_depth = project.index_depth or IndexDepth.DEEP
             token = (
                 decrypt_token(project.git_token_encrypted)
                 if project.git_token_encrypted
@@ -435,6 +497,7 @@ async def run_index_job(
             mode, project_id=pid, repo_dir=repo_dir,
             last_indexed_commit=last_indexed_commit,
             commit_sha=commit_sha, walk_files=walk.files,
+            depth=depth, current_depth=current_depth,
         )
         if plan.is_incremental:
             await _update_job(job_id, kind=MODE_INCREMENTAL)
@@ -484,6 +547,7 @@ async def run_index_job(
         )
         stats = {
             "mode": plan.mode,
+            "depth": depth,
             "files_parsed": len(files),
             "files_skipped": walk.skipped + parse_failed,
             "chunks": len(chunks),
@@ -515,7 +579,7 @@ async def run_index_job(
         )
         module_summaries, project_summary, summary_partial = await _summarize_all(
             pid, module_map, files, chunks, imports, heads, readme, stats,
-            on_progress=summarize_progress,
+            on_progress=summarize_progress, depth=depth,
         )
         module_hashes = stats.pop("_module_hashes", {})
         public_stats = {k: v for k, v in stats.items()}
@@ -635,11 +699,11 @@ async def run_index_job(
 
         # ---- report (92-100)：读图产报告，失败只标 partial（M3 spec：不阻塞索引成功）----
         await _update_job(job_id, stage=JobStage.REPORT)
-        report_stats = await generate_and_store_report(project_id)
+        report_stats = await generate_and_store_report(project_id, depth=depth)
         stats.update(report_stats)
         await _update_job(job_id, stats_json=stats)
 
-        await _finish(job_id, project_id, commit_sha=commit_sha)
+        await _finish(job_id, project_id, commit_sha=commit_sha, depth=depth)
         reason = partial_reason(summary_partial, report_stats)
         if reason:
             await _update_job(job_id, error_text=reason)
@@ -653,7 +717,7 @@ async def run_index_job(
 
 
 async def start_index_job(
-    project_id: uuid.UUID, mode: str = MODE_AUTO
+    project_id: uuid.UUID, mode: str = MODE_AUTO, depth: str = IndexDepth.DEEP
 ) -> IndexJob | None:
     """创建任务并启动后台协程；已有 running 任务返回 None（API 层转 409）。
 
@@ -675,5 +739,5 @@ async def start_index_job(
         await session.commit()
         await session.refresh(job)
 
-    asyncio.create_task(run_index_job(job.id, project_id, mode))
+    asyncio.create_task(run_index_job(job.id, project_id, mode, depth))
     return job
