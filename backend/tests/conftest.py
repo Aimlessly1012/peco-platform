@@ -6,7 +6,6 @@ import re
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 
@@ -78,21 +77,34 @@ _SESSION_LOCAL_USERS = (
     "app.mcp_server.resolver",
     "app.mcp_server.server",
     "app.api.chat",
+    "app.services.auth.bootstrap",   # M8 管理员初始化在 lifespan 里查 users 表
 )
 
 
 @pytest.fixture
-async def test_db(monkeypatch):
-    """sqlite 内存库（StaticPool 使多连接共享同一库）+ 覆盖各模块的 SessionLocal。"""
+async def test_db(tmp_path, monkeypatch):
+    """sqlite 临时文件库 + 开 FK 校验，覆盖各模块的 SessionLocal。
+
+    不用内存库 + StaticPool：共享单连接会让并发请求的事务互相污染
+    （A commit 把 B 未回滚的 flush 一起带上库），且 SQLite 默认不查外键——
+    这两点曾把生产 Postgres 上的真 bug（注册 FK 顺序、并发回滚）藏成绿灯。
+    文件库多连接各自独立事务，写锁等待语义与 Postgres 行锁接近。
+    """
     import importlib
+
+    from sqlalchemy import event
 
     from app.models.tables import Base
 
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        connect_args={"timeout": 30},  # 并发写撞库级锁时等待而不是立刻 SQLITE_BUSY
     )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_fk(dbapi_conn, _record):
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -104,9 +116,49 @@ async def test_db(monkeypatch):
     await engine.dispose()
 
 
+async def seed_user(session_factory, username: str, role: str):
+    """建一个用户并返回 (user_id, 登录 cookie)。走真实 JWT，不 mock 依赖。"""
+    from app.models.tables import User
+    from app.services.auth.security import COOKIE_NAME, create_token, hash_password
+
+    async with session_factory() as session:
+        user = User(
+            username=username, password_hash=hash_password("pw123456"), role=role
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user.id, {COOKIE_NAME: create_token(str(user.id), role)}
+
+
 @pytest.fixture
 async def api_client(test_db):
-    """不进 lifespan 的 API 客户端（避免测试依赖 Neo4j 启动检查）。"""
+    """不进 lifespan 的 API 客户端（避免测试依赖 Neo4j 启动检查）。
+
+    M8 起默认带 admin 登录态——业务测试关心的是业务行为，鉴权本身由
+    test_auth.py 专门覆盖。要测未登录/member 的场景请用 anon_client / member_client。
+    """
+    from app.core.db import get_session
+    from app.main import app
+    from app.models.tables import UserRole
+
+    async def override_session():
+        async with test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    _, cookies = await seed_user(test_db, "admin", UserRole.ADMIN)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://localhost:8001", cookies=cookies
+    ) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def anon_client(test_db):
+    """无登录态客户端（测守卫用）。"""
     from app.core.db import get_session
     from app.main import app
 
@@ -117,5 +169,27 @@ async def api_client(test_db):
     app.dependency_overrides[get_session] = override_session
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost:8001") as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def member_client(test_db):
+    """member 登录态客户端（测权限边界用）。"""
+    from app.core.db import get_session
+    from app.main import app
+    from app.models.tables import UserRole
+
+    async def override_session():
+        async with test_db() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    user_id, cookies = await seed_user(test_db, "member1", UserRole.MEMBER)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://localhost:8001", cookies=cookies
+    ) as client:
+        client.user_id = user_id
         yield client
     app.dependency_overrides.clear()

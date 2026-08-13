@@ -109,6 +109,7 @@ async def mcp_session(test_db, monkeypatch):
 
     monkeypatch.setattr("app.main.ensure_vector_index", noop)
     monkeypatch.setattr("app.main.close_driver", noop)
+    monkeypatch.setattr("app.main.ensure_admin_user", noop)  # M8：这里不测管理员初始化
 
     from app.main import create_app
 

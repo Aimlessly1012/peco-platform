@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import StageBar from "@/components/StageBar";
 import { api, IndexDepth, IndexJob, mcpEndpoint, Project } from "@/lib/api";
 import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/labels";
@@ -11,6 +12,8 @@ const COLS = "grid-cols-[14px_1fr_150px_150px_176px]";
 type Filter = "all" | "indexing" | "failed";
 
 export default function ProjectListPage() {
+  // 删除项目是 admin 专属（后端 DELETE 也挂了 require_admin，这里只是不给入口）
+  const { isAdmin } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Record<string, IndexJob>>({});
   const [showDialog, setShowDialog] = useState(false);
@@ -237,13 +240,15 @@ export default function ProjectListPage() {
                       >
                         {p.status === "pending" ? "开始索引" : "⟳"}
                       </button>
-                      <button
-                        onClick={() => remove(p)}
-                        title="删除项目"
-                        className="px-1 text-danger hover:underline"
-                      >
-                        ✕
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => remove(p)}
+                          title="删除项目"
+                          className="px-1 text-danger hover:underline"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   </div>
 

@@ -29,6 +29,7 @@ def authed_app(monkeypatch, test_db):
 
     monkeypatch.setattr("app.main.ensure_vector_index", noop)
     monkeypatch.setattr("app.main.close_driver", noop)
+    monkeypatch.setattr("app.main.ensure_admin_user", noop)
 
     from app.main import create_app
 
@@ -71,10 +72,13 @@ async def test_bad_credentials_rejected(authed_app, value):
 
 
 async def test_business_routes_not_affected_by_mcp_auth(authed_app):
-    """鉴权只拦 /mcp，后台自身的 API 不受影响。"""
+    """MCP 的 Bearer 守卫只拦 /mcp，不碰其他路由。
+
+    这里只用 /health：M8 之后 /mcp-info 需要账号登录态，它返回 401 是账号守卫
+    的结果而非 MCP 守卫，混在一起断言会掩盖真正要测的东西。
+    """
     async with await client_for(authed_app) as client:
         assert (await client.get("/health")).status_code == 200
-        assert (await client.get("/mcp-info")).status_code == 200
 
 
 async def test_valid_token_passes_through(authed_app, monkeypatch):

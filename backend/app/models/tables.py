@@ -38,6 +38,42 @@ class JobStage:
     REPORT = "report"
 
 
+class UserRole:
+    """M8：admin 可管理邀请码与删项目；member 有除管理外的全部功能。"""
+
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(128))
+    role: Mapped[str] = mapped_column(String(10), default=UserRole.MEMBER)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class InviteCode(Base):
+    """一次性邀请码：used_by 非空即已消耗（注册时在同一事务里置位，防并发双花）。"""
+
+    __tablename__ = "invite_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    used_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class IndexDepth:
     """索引深度（M5 D7）。fast = 零 LLM 录入，deep = 完整理解。"""
 
@@ -130,6 +166,10 @@ class ChatSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE")
+    )
+    # M8：会话归属。NULL = M8 之前的历史会话，只有 admin 看得到
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), default=None, index=True
     )
     title: Mapped[str] = mapped_column(String(200), default="新会话")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

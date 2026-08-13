@@ -1,10 +1,12 @@
 """服务元信息：MCP 接入说明数据源（M4 B11，供 /mcp-guide 页展示）。"""
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from app.core.config import settings
 from app.mcp_server.server import mcp
 
-router = APIRouter(tags=["meta"])
+from app.services.auth.deps import require_user
+
+router = APIRouter(tags=["meta"], dependencies=[Depends(require_user)])
 
 
 @router.get("/mcp-info")

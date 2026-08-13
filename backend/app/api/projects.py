@@ -24,9 +24,13 @@ from app.services.ingest.pipeline import (
     VALID_MODES,
     start_index_job,
 )
+from app.services.auth.deps import require_admin, require_user
 from app.services.report.graph_reader import read_project_tree
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+# M8：整组业务路由要求登录态。/auth/*、/health、/mcp 不在此列（见 deps.py 注释）
+router = APIRouter(
+    prefix="/projects", tags=["projects"], dependencies=[Depends(require_user)]
+)
 
 
 async def _get_project_or_404(project_id: uuid.UUID, session: AsyncSession) -> Project:
@@ -67,7 +71,9 @@ async def get_project(
 
 @router.delete("/{project_id}", status_code=204)
 async def delete_project(
-    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    admin: Project = Depends(require_admin),   # M8：删项目是不可逆操作，仅 admin
 ):
     """级联删除：Postgres 记录（FK cascade）+ Neo4j 子图 + 本地仓库副本。"""
     project = await _get_project_or_404(project_id, session)

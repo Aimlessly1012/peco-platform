@@ -5,6 +5,29 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    # 上限 72：bcrypt 只认前 72 字节，更长的部分会被忽略——不如直接拒
+    password: str = Field(min_length=6, max_length=72)
+
+
+class RegisterRequest(LoginRequest):
+    invite_code: str = Field(min_length=4, max_length=16)
+
+
+class UserOut(BaseModel):
+    username: str
+    role: str
+
+
+class InviteCodeOut(BaseModel):
+    code: str
+    used: bool
+    used_by_name: str | None = None
+    used_at: datetime | None = None
+    created_at: datetime
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     git_url: str = Field(min_length=8, max_length=500)

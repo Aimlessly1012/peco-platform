@@ -4,17 +4,45 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.db import SessionLocal, get_session
-from app.models.tables import ChatMessage, ChatSession, Project, ProjectStatus
+from app.models.tables import (
+    ChatMessage,
+    ChatSession,
+    Project,
+    ProjectStatus,
+    User,
+    UserRole,
+)
 from app.schemas import AskRequest, ChatMessageOut, ChatSessionCreate, ChatSessionOut
+from app.services.auth.deps import require_user
 from app.services.qa.workflow import qa_graph
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["chat"])
+# M8：聊天全组要求登录态；会话按人隔离见 _owned_session
+router = APIRouter(tags=["chat"], dependencies=[Depends(require_user)])
+
+
+def _visible_to(user: User):
+    """会话可见性条件（M8 B7）：自己的会话；admin 另可见 user_id 为空的历史会话。"""
+    if user.role == UserRole.ADMIN:
+        return or_(ChatSession.user_id == user.id, ChatSession.user_id.is_(None))
+    return ChatSession.user_id == user.id
+
+
+async def _owned_session(
+    session_id: uuid.UUID, session: AsyncSession, user: User
+) -> ChatSession:
+    """取自己的会话。别人的会话一律 404——403 会泄露"这个会话存在"。"""
+    chat = await session.scalar(
+        select(ChatSession).where(ChatSession.id == session_id, _visible_to(user))
+    )
+    if chat is None:
+        raise HTTPException(404, "会话不存在")
+    return chat
 
 
 @router.post(
@@ -24,11 +52,14 @@ async def create_session(
     project_id: uuid.UUID,
     payload: ChatSessionCreate,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ):
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(404, "项目不存在")
-    chat = ChatSession(project_id=project_id, title=payload.title or "新会话")
+    chat = ChatSession(
+        project_id=project_id, title=payload.title or "新会话", user_id=user.id
+    )
     session.add(chat)
     await session.commit()
     await session.refresh(chat)
@@ -37,11 +68,13 @@ async def create_session(
 
 @router.get("/projects/{project_id}/sessions", response_model=list[ChatSessionOut])
 async def list_sessions(
-    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ):
     result = await session.scalars(
         select(ChatSession)
-        .where(ChatSession.project_id == project_id)
+        .where(ChatSession.project_id == project_id, _visible_to(user))
         .order_by(desc(ChatSession.created_at))
     )
     return list(result)
@@ -49,8 +82,11 @@ async def list_sessions(
 
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
 async def list_messages(
-    session_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+    session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ):
+    await _owned_session(session_id, session, user)
     result = await session.scalars(
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
@@ -60,12 +96,16 @@ async def list_messages(
 
 
 @router.post("/sessions/{session_id}/ask")
-async def ask(session_id: uuid.UUID, payload: AskRequest):
+async def ask(
+    session_id: uuid.UUID,
+    payload: AskRequest,
+    user: User = Depends(require_user),
+):
     """SSE 流式问答。事件：token / citations / done / error。"""
     async with SessionLocal() as db:
-        chat = await db.get(ChatSession, session_id)
-        if chat is None:
-            raise HTTPException(404, "会话不存在")
+        # 归属校验走这条自建连接（本端点不用注入的 session）——
+        # 漏了这句，别人的会话 ID 就能被拿来提问并把消息写进去
+        chat = await _owned_session(session_id, db, user)
         project = await db.get(Project, chat.project_id)
         if project.status != ProjectStatus.READY:
             # spec: 项目就绪校验——不产生模型调用

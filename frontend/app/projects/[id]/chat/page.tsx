@@ -17,6 +17,7 @@ import {
   Citation,
   Project,
 } from "@/lib/api";
+import ThinkingIndicator from "@/components/ThinkingIndicator";
 import { rehypeCitationRefs } from "@/lib/citations";
 
 interface DisplayMessage {
@@ -24,6 +25,12 @@ interface DisplayMessage {
   content: string;
   citations: Citation[];
   streaming?: boolean;
+  /** 发起时刻，等待态用它计时（仅本次会话内有效，不落库）。 */
+  startedAt?: number;
+  /** 收到过 SSE 心跳 = 连接确实活着。 */
+  pinged?: boolean;
+  /** 出错的回答保留在原位，可就地重试。 */
+  failed?: string;
 }
 
 /** 答案正文：引用上标可点，长路径 inline code 中段省略。 */
@@ -151,6 +158,42 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setActiveSession(s.id);
   }, [projectId, sessions.length]);
 
+  /**
+   * 把第 index 条 assistant 消息接上流；首次发送与重试共用。
+   * 按索引而不是「最后一条」定位：重试时那条失败消息未必还在末尾。
+   */
+  const runAsk = useCallback(
+    async (sessionId: string, question: string, index: number) => {
+    const patchLast = (
+      patch: Partial<DisplayMessage> | ((m: DisplayMessage) => Partial<DisplayMessage>)
+    ) =>
+      setMessages((prev) =>
+        prev.map((m, i) => {
+          if (i !== index) return m;
+          const p = typeof patch === "function" ? patch(m) : patch;
+          return { ...m, ...p };
+        })
+      );
+
+    await askStream(sessionId, question, {
+      onToken: (t) => patchLast((m) => ({ content: m.content + t })),
+      onCitations: (c) => patchLast({ citations: c }),
+      // 心跳只在首 token 之前有意义，标一次就够
+      onPing: () => patchLast((m) => (m.pinged ? {} : { pinged: true })),
+      onDone: () => {
+        patchLast({ streaming: false });
+        setBusy(false);
+      },
+      onError: (message) => {
+        setError(message);
+        patchLast({ streaming: false, failed: message });
+        setBusy(false);
+      },
+    });
+    },
+    []
+  );
+
   const send = async () => {
     if (!input.trim() || busy) return;
     let sessionId = activeSession;
@@ -170,35 +213,46 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setMessages((prev) => [
       ...prev,
       { role: "user", content: question, citations: [] },
-      { role: "assistant", content: "", citations: [], streaming: true },
+      {
+        role: "assistant",
+        content: "",
+        citations: [],
+        streaming: true,
+        startedAt: Date.now(),
+      },
     ]);
     setSelected(null);
-
-    const patchLast = (
-      patch: Partial<DisplayMessage> | ((m: DisplayMessage) => Partial<DisplayMessage>)
-    ) =>
-      setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        const p = typeof patch === "function" ? patch(last) : patch;
-        next[next.length - 1] = { ...last, ...p };
-        return next;
-      });
-
-    await askStream(sessionId, question, {
-      onToken: (t) => patchLast((m) => ({ content: m.content + t })),
-      onCitations: (c) => patchLast({ citations: c }),
-      onDone: () => {
-        patchLast({ streaming: false });
-        setBusy(false);
-      },
-      onError: (message) => {
-        setError(message);
-        patchLast({ streaming: false });
-        setBusy(false);
-      },
-    });
+    // user 占 messages.length，assistant 紧随其后
+    await runAsk(sessionId, question, messages.length + 1);
   };
+
+  /** 重试：复用紧邻的那条提问，把失败的回答就地重置为等待态。 */
+  const retry = useCallback(
+    async (index: number) => {
+      if (busy || !activeSession) return;
+      const question = messages[index - 1]?.content;
+      if (!question) return;
+      setError("");
+      setBusy(true);
+      setMessages((prev) =>
+        prev.map((m, i) =>
+          i === index
+            ? {
+                ...m,
+                content: "",
+                citations: [],
+                streaming: true,
+                failed: undefined,
+                pinged: false,
+                startedAt: Date.now(),
+              }
+            : m
+        )
+      );
+      await runAsk(activeSession, question, index);
+    },
+    [busy, activeSession, messages, runAsk]
+  );
 
   /** 右栏显示：选中的回答，否则最后一条带引用的回答 */
   const sourceIndex = useMemo(() => {
@@ -311,19 +365,41 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     {m.citations.length > 0 ? ` · 命中 ${m.citations.length} 个代码块` : ""}
                   </span>
                 </div>
-                <div
-                  onClick={() => setSelected(i)}
-                  className={`cursor-default border bg-panel px-5 py-[18px] text-[13px] leading-[1.95] ${
-                    sourceIndex === i ? "border-line" : "border-hair"
-                  }`}
-                >
-                  <div className="prose prose-sm max-w-none prose-p:my-0 prose-p:mb-3 prose-p:last:mb-0 prose-code:bg-accent/[.08] prose-code:px-1 prose-code:py-px prose-code:text-accent prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-none prose-pre:border prose-pre:border-line prose-pre:bg-shade prose-pre:text-ink2">
-                    <AnswerBody
-                      content={m.content || (m.streaming ? "思考中…" : "")}
-                      onCite={(n) => handleCite(i, n)}
-                    />
+                {/* 首 token 之前走等待态；一有内容立刻切流式渲染 */}
+                {m.streaming && !m.content ? (
+                  <ThinkingIndicator
+                    startedAt={m.startedAt ?? Date.now()}
+                    pinged={m.pinged}
+                  />
+                ) : (
+                  <div
+                    onClick={() => setSelected(i)}
+                    className={`cursor-default border bg-panel px-5 py-[18px] text-[13px] leading-[1.95] ${
+                      sourceIndex === i ? "border-line" : "border-hair"
+                    }`}
+                  >
+                    <div className="prose prose-sm max-w-none prose-p:my-0 prose-p:mb-3 prose-p:last:mb-0 prose-code:bg-accent/[.08] prose-code:px-1 prose-code:py-px prose-code:text-accent prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-none prose-pre:border prose-pre:border-line prose-pre:bg-shade prose-pre:text-ink2">
+                      <AnswerBody content={m.content} onCite={(n) => handleCite(i, n)} />
+                    </div>
+                    {m.streaming && m.content && (
+                      <span className="ml-0.5 inline-block h-[13px] w-[7px] animate-pulse bg-accent align-text-bottom" />
+                    )}
                   </div>
-                </div>
+                )}
+
+                {m.failed && (
+                  <div className="flex flex-wrap items-center gap-3 border-l-2 border-danger bg-danger/[.06] px-3 py-2 text-[11px] leading-relaxed text-danger">
+                    <span className="min-w-0 flex-1">{m.failed}</span>
+                    <button
+                      type="button"
+                      onClick={() => retry(i)}
+                      disabled={busy}
+                      className="flex-none border border-danger/40 px-2.5 py-1 text-[10px] tracking-wide text-danger hover:bg-danger/[.08] disabled:opacity-40"
+                    >
+                      ⟳ 重试
+                    </button>
+                  </div>
+                )}
               </div>
             )
           )}

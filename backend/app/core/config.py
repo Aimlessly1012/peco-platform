@@ -47,7 +47,12 @@ class Settings(BaseSettings):
     # 中文最坏密度 ~1.5 字符/token → 3000 字符安全；换 8192 上限的模型可调大
     embedding_max_chars: int = 3000
 
+    # M8：JWT 签名密钥。生产必须改成 32+ 字节随机串，否则登录态可被伪造
     secret_key: str = "dev-secret-key"
+
+    # M8：管理员初始化。仅在库中没有 admin 时生效；已有 admin 后改这里不会覆盖
+    admin_username: str = "admin"
+    admin_password: str = ""
     repos_dir: Path = Path("./data/repos")
 
     retrieval_top_k: int = 8

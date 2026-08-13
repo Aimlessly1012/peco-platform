@@ -161,12 +161,37 @@ export function isNotFound(e: unknown): boolean {
   return e instanceof ApiError && e.status === 404;
 }
 
+/**
+ * 401 的统一去向由 AuthProvider 注入。
+ *
+ * 这里不直接跳 `/login`：子路径部署时裸字符串不带 basePath，必须走 next 的 router。
+ * 所以 api 层只负责通知，跳哪、怎么带回跳地址交给上层。
+ */
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  unauthorizedHandler = fn;
+}
+
+/** /auth/* 自身的 401 是「登录失败」「未登录探测」，不该触发跳转。 */
+function isAuthPath(path: string): boolean {
+  return path.startsWith("/auth/");
+}
+
+function notifyUnauthorized(path: string, status: number): void {
+  if (status === 401 && !isAuthPath(path)) unauthorizedHandler?.();
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
+    // 登录态是 httpOnly cookie：本地开发跨端口（3200→9200）必须显式带上
+    credentials: "include",
   });
   if (!res.ok) {
+    notifyUnauthorized(path, res.status);
     const body = await res.json().catch(() => ({}));
     throw new ApiError(body.detail || `请求失败 (${res.status})`, res.status);
   }
@@ -174,11 +199,48 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export type UserRole = "admin" | "member";
+
+export interface AuthUser {
+  username: string;
+  role: UserRole;
+}
+
+/** GET /auth/invites 的元素（admin 专用）。 */
+export interface InviteCode {
+  code: string;
+  used_by_name: string | null;
+  used_at: string | null;
+  created_at: string;
+}
+
+export const authApi = {
+  me: () => api<AuthUser>("/auth/me"),
+  login: (username: string, password: string) =>
+    api<AuthUser>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  register: (username: string, password: string, invite_code: string) =>
+    api<AuthUser>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, password, invite_code }),
+    }),
+  logout: () => api<void>("/auth/logout", { method: "POST" }),
+  listInvites: () => api<InviteCode[]>("/auth/invites"),
+  createInvite: () => api<InviteCode>("/auth/invites", { method: "POST" }),
+};
+
 export interface AskCallbacks {
   onToken: (t: string) => void;
   onCitations: (c: Citation[]) => void;
   onDone: () => void;
   onError: (message: string) => void;
+  /**
+   * SSE 注释行（后端约 15s 一个 `: ping`）到达。
+   * 首 token 之前唯一能证明「连接还活着」的信号，用来把等待文案说得更笃定。
+   */
+  onPing?: () => void;
 }
 
 /** 解析后端 SSE（event: xxx / data: yyy 块）。 */
@@ -191,8 +253,10 @@ export async function askStream(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
+    credentials: "include",
   });
   if (!res.ok || !res.body) {
+    notifyUnauthorized(`/sessions/${sessionId}/ask`, res.status);
     const body = await res.json().catch(() => ({}));
     cb.onError(body.detail || `请求失败 (${res.status})`);
     return;
@@ -204,10 +268,15 @@ export async function askStream(
   const handleBlock = (block: string) => {
     let event = "message";
     let data = "";
+    let comment = false;
     for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
+      // `:` 开头是 SSE 注释行（心跳）。只跳过这一行，不能丢弃整个块——
+      // 心跳可能和真事件粘在同一块里（后端未必在 ping 后补空行）。
+      if (line.startsWith(":")) comment = true;
+      else if (line.startsWith("event:")) event = line.slice(6).trim();
       else if (line.startsWith("data:")) data += line.slice(5).trim();
     }
+    if (comment) cb.onPing?.();
     if (event === "token") cb.onToken(JSON.parse(data).t);
     else if (event === "citations") cb.onCitations(JSON.parse(data));
     else if (event === "done") cb.onDone();

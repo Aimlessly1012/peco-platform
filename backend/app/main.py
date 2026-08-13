@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
+from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.meta import router as meta_router
 from app.api.projects import router as projects_router
@@ -12,6 +13,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.graph.client import close_driver, ensure_vector_index
 from app.mcp_server.auth import MCPAuthMiddleware
+from app.services.auth.bootstrap import check_secret_key, ensure_admin_user
 from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
 
@@ -42,6 +44,8 @@ async def _recover_stale_jobs() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ensure_vector_index()
+    check_secret_key()          # M8：默认/过短的 SECRET_KEY 会让登录态可伪造
+    await ensure_admin_user()   # M8：无 admin 且配了 ADMIN_PASSWORD 时创建
     await _recover_stale_jobs()
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
     # MCP session manager 必须在这里启动：Starlette 的 Mount 不传播 lifespan，
@@ -62,6 +66,9 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:3200"],
+        # M8 登录态走 httpOnly cookie：本地开发跨端口（3200→9200）必须放行凭据，
+        # 缺这行浏览器直接拦 preflight（生产同域不经 CORS，不受影响）
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -74,6 +81,7 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok"}
 
+    app.include_router(auth_router)
     app.include_router(projects_router)
     app.include_router(chat_router)
     app.include_router(meta_router)
