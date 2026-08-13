@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import CopyButton from "@/components/CopyButton";
@@ -9,6 +10,7 @@ import {
   api,
   IndexJob,
   isNotFound,
+  mcpEndpoint,
   ModuleInfo,
   ModuleMap,
   Project,
@@ -226,12 +228,12 @@ export default function ProjectDetailPage({
       <div className="flex min-h-0 flex-1 items-center justify-center px-7">
         <div className="border border-dashed border-line px-10 py-14 text-center">
           <div className="text-sm text-muted">项目不存在或已被删除</div>
-          <a
+          <Link
             href="/"
             className="mt-5 inline-block bg-ink px-4 py-2 text-[11px] tracking-wide text-paper"
           >
             ← 返回项目列表
-          </a>
+          </Link>
         </div>
       </div>
     );
@@ -245,9 +247,9 @@ export default function ProjectDetailPage({
       {/* 左栏：项目元信息与操作 */}
       <aside className="hidden w-[212px] flex-none flex-col gap-6 overflow-y-auto border-r border-line bg-canvas px-5 py-6 md:flex">
         <div className="flex flex-col gap-2">
-          <a href="/" className="text-[11px] text-faint hover:text-ink">
+          <Link href="/" className="text-[11px] text-faint hover:text-ink">
             ← 项目
-          </a>
+          </Link>
           <div className="break-words text-[17px] font-semibold leading-tight">
             {project?.name ?? "…"}
           </div>
@@ -288,7 +290,7 @@ export default function ProjectDetailPage({
         </dl>
 
         <div className="flex flex-col gap-2">
-          <a
+          <Link
             href={`/projects/${projectId}/chat`}
             className={`px-3 py-2 text-center text-[11px] tracking-wide ${
               project?.status === "ready"
@@ -297,7 +299,7 @@ export default function ProjectDetailPage({
             }`}
           >
             聊天
-          </a>
+          </Link>
           {isFast && (
             <button
               onClick={deepen}
@@ -319,9 +321,9 @@ export default function ProjectDetailPage({
         <div className="mt-auto text-[11px] leading-relaxed text-faint">
           MCP
           <br />
-          <a href="/mcp-guide" className="text-muted hover:text-accent">
-            localhost:8001/mcp
-          </a>
+          <Link href="/mcp-guide" className="break-all text-muted hover:text-accent">
+            {mcpEndpoint()}
+          </Link>
         </div>
       </aside>
 
@@ -336,9 +338,9 @@ export default function ProjectDetailPage({
 
         {/* 小屏没有左栏，操作入口在这里补齐 */}
         <div className="mt-3 flex flex-wrap items-center gap-2 md:hidden">
-          <a href="/" className="text-[11px] text-faint hover:text-ink">
+          <Link href="/" className="text-[11px] text-faint hover:text-ink">
             ← 项目
-          </a>
+          </Link>
           {badge && (
             <span className={`border px-2 py-[3px] text-[10px] tracking-wide ${badge.cls}`}>
               {badge.glyph} {badge.label}
@@ -349,7 +351,7 @@ export default function ProjectDetailPage({
               FAST
             </span>
           )}
-          <a
+          <Link
             href={`/projects/${projectId}/chat`}
             className={`ml-auto px-3 py-1.5 text-[11px] tracking-wide ${
               project?.status === "ready"
@@ -358,7 +360,7 @@ export default function ProjectDetailPage({
             }`}
           >
             聊天
-          </a>
+          </Link>
           {isFast && (
             <button
               onClick={deepen}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import PathText, {
@@ -266,21 +267,21 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       {/* 答案栏 */}
       <div className="flex min-w-0 flex-1 flex-col border-r border-line">
         <div className="flex flex-none items-center gap-2.5 border-b border-line bg-panel px-[30px] py-3">
-          <a href="/" className="text-xs text-faint hover:text-ink">
+          <Link href="/" className="text-xs text-faint hover:text-ink">
             ← 项目
-          </a>
-          <a
+          </Link>
+          <Link
             href={`/projects/${projectId}`}
             className="text-[13px] font-medium hover:text-accent"
           >
             {project?.name ?? "…"}
-          </a>
-          <a
+          </Link>
+          <Link
             href={`/projects/${projectId}`}
             className="text-[10px] tracking-wide text-faint hover:text-accent"
           >
             详情 →
-          </a>
+          </Link>
           {project && project.status !== "ready" && (
             <span className="border border-danger/40 px-2 py-[2px] text-[10px] tracking-wide text-danger">
               {project.status.toUpperCase()} · 暂不能提问
@@ -432,13 +433,13 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   <span className="truncate" title={c.symbol || undefined}>
                     {name || "—"}
                   </span>
-                  <a
+                  <Link
                     href={`/projects/${projectId}?tab=modules`}
                     title="在功能地图中查看所属模块"
                     className="ml-auto flex-none text-accent opacity-0 transition-opacity hover:underline focus:opacity-100 group-hover:opacity-100"
                   >
                     功能地图 →
-                  </a>
+                  </Link>
                 </div>
               </div>
             );

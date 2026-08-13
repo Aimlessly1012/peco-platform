@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
@@ -28,7 +29,7 @@ export default function TopNav() {
         {NAV.map((n) => {
           const on = n.active(pathname);
           return (
-            <a
+            <Link
               key={n.href}
               href={n.href}
               aria-current={on ? "page" : undefined}
@@ -40,7 +41,7 @@ export default function TopNav() {
                 className={`block h-[5px] w-[5px] ${on ? "bg-accent" : "bg-transparent"}`}
               />
               {n.label}
-            </a>
+            </Link>
           );
         })}
       </nav>

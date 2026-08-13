@@ -168,8 +168,8 @@ async def test_retrieve_impact_uses_top_hit_as_target(retrieval_stub):
     impact_call = next(c for c in retrieval_stub["calls"] if "impact_target" in c)
     assert impact_call["impact_target"] == "backend/services/order_service.py"
     assert impact_call["max_depth"] == 3
-    # impact 的常规检索走 local 策略
-    assert retrieval_stub["calls"][0]["type"] == "local"
+    # M7：impact 透传到检索层（据此跳过 rerank），检索策略内部仍等同 local
+    assert retrieval_stub["calls"][0]["type"] == "impact"
 
 
 async def test_retrieve_impact_degrades_when_no_target(retrieval_stub):

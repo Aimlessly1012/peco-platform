@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StageBar from "@/components/StageBar";
-import { api, IndexDepth, IndexJob, Project } from "@/lib/api";
+import { api, IndexDepth, IndexJob, mcpEndpoint, Project } from "@/lib/api";
 import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/labels";
 
 const COLS = "grid-cols-[14px_1fr_150px_150px_176px]";
@@ -107,9 +108,9 @@ export default function ProjectListPage() {
         <div className="mt-auto text-[11px] leading-relaxed text-faint">
           MCP
           <br />
-          <a href="/mcp-guide" className="text-muted hover:text-accent">
-            localhost:8001/mcp
-          </a>
+          <Link href="/mcp-guide" className="break-all text-muted hover:text-accent">
+            {mcpEndpoint()}
+          </Link>
         </div>
       </aside>
 
@@ -179,12 +180,12 @@ export default function ProjectListPage() {
                       {s.glyph}
                     </span>
                     <div className="min-w-0">
-                      <a
+                      <Link
                         href={`/projects/${p.id}`}
                         className="text-[15px] font-medium hover:text-accent"
                       >
                         {p.name}
-                      </a>
+                      </Link>
                       <div className="mt-[3px] truncate text-[11px] text-muted">
                         {p.git_url}
                         {p.default_branch ? ` · ${p.default_branch}` : ""}
@@ -204,19 +205,19 @@ export default function ProjectListPage() {
                       {p.status === "indexing" && job ? `INDEXING ${job.progress}%` : s.label}
                     </span>
                     <div className="flex justify-end gap-2 text-[11px]">
-                      <a
+                      <Link
                         href={`/projects/${p.id}`}
                         className="border border-line px-[10px] py-[5px] text-muted hover:border-ink hover:text-ink"
                       >
                         详情
-                      </a>
+                      </Link>
                       {p.status === "ready" ? (
-                        <a
+                        <Link
                           href={`/projects/${p.id}/chat`}
                           className="bg-ink px-[10px] py-[5px] font-medium text-paper"
                         >
                           聊天
-                        </a>
+                        </Link>
                       ) : (
                         <span className="border border-hair px-[10px] py-[5px] text-faint">
                           聊天

@@ -18,4 +18,6 @@ COPY . .
 RUN uv sync --no-dev
 
 EXPOSE 8000
-CMD ["sh", "-c", "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# ROOT_PATH 供 Nginx 子路径部署（M7 D3）：只影响 openapi.json / docs 里的地址生成，
+# 路由本身不加前缀（Nginx 已剥掉前缀再转发）。默认空 = 本机形态不变
+CMD ["sh", "-c", "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --root-path \"${ROOT_PATH:-}\""]

@@ -167,10 +167,9 @@ async def _impact_context(project_id: str, question: str, items: list[RetrievedI
 async def retrieve_node(state: QAState) -> QAState:
     question = state.get("rewritten_question") or state["question"]
     qtype = state.get("question_type", "local")
-    # impact 的目标定位与常规回答都需要局部检索结果，故检索策略同 local
-    items = await search_layered(
-        state["project_id"], question, "local" if qtype == "impact" else qtype
-    )
+    # impact 的目标定位与常规回答都需要局部检索结果，故检索策略同 local；
+    # 但要把 impact 透传下去——检索层据此跳过 rerank（M7 D2：它按图距离排序）
+    items = await search_layered(state["project_id"], question, qtype)
 
     parts = [_format_item(i + 1, item) for i, item in enumerate(items)]
     project_summary = ""

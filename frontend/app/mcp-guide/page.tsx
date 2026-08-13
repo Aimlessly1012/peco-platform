@@ -1,10 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import CopyButton from "@/components/CopyButton";
-import { API_BASE } from "@/lib/api";
+import { mcpEndpoint } from "@/lib/api";
 
-const MCP_URL = `${API_BASE.replace(/\/+$/, "")}/mcp`;
-const ADD_COMMAND = `claude mcp add --transport http rag-coder ${MCP_URL}`;
+const addCommand = (url: string) =>
+  `claude mcp add --transport http rag-coder ${url}`;
 
 const TOOLS: { name: string; usage: string; args: string }[] = [
   {
@@ -83,6 +84,13 @@ function Step({
 }
 
 export default function McpGuidePage() {
+  // 子路径部署下 API_BASE 是相对路径，挂载后用当前站点 origin 补成可执行的绝对 URL
+  const [mcpUrl, setMcpUrl] = useState(() => mcpEndpoint());
+  useEffect(() => {
+    setMcpUrl(mcpEndpoint(window.location.origin));
+  }, []);
+  const ADD_COMMAND = addCommand(mcpUrl);
+
   return (
     <div className="flex min-h-0 flex-1">
       {/* 左栏：端点信息 */}
@@ -95,7 +103,7 @@ export default function McpGuidePage() {
 
         <div className="flex flex-col gap-2">
           <div className="text-[10px] tracking-label text-dim">ENDPOINT</div>
-          <div className="break-all text-[11px] text-muted">{MCP_URL}</div>
+          <div className="break-all text-[11px] text-muted">{mcpUrl}</div>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -130,7 +138,7 @@ export default function McpGuidePage() {
             <span className="text-[10px] tracking-label text-dim">SERVER URL</span>
           </div>
           <div className="p-4">
-            <CommandBlock command={MCP_URL} label="COPY URL" />
+            <CommandBlock command={mcpUrl} label="COPY URL" />
           </div>
         </section>
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from app.core.config import settings
 from app.graph.client import get_driver
 from app.services.ingest.embedder import embedder
+from app.services.retrieval import reranker
 
 RRF_K = 60
 
@@ -188,15 +189,51 @@ async def get_project_summary(project_id: str) -> str:
         return (record and record["s"]) or ""
 
 
+def _rerank_document(item: RetrievedItem) -> str:
+    """送去精排的文档文本：chunk 是代码、摘要节点是摘要（D2）。
+
+    带上文件路径与符号名作头——纯代码片段常常看不出它属于什么业务，
+    重排模型拿到定位信息判得更准。
+    """
+    head = item.file_path or item.symbol
+    if item.symbol and item.symbol not in ("(file)", head):
+        head = f"{head} :: {item.symbol}"
+    body = item.content or ""
+    return f"{head}\n{body}" if head else body
+
+
+async def _apply_rerank(
+    query: str, items: list[RetrievedItem], final_k: int
+) -> list[RetrievedItem]:
+    """RRF 候选池 → 重排取 final_k。失败时保持 RRF 顺序（D2 降级）。"""
+    if not items:
+        return items
+    ranking = await reranker.rerank(
+        query, [_rerank_document(item) for item in items], top_n=final_k
+    )
+    if ranking is None:
+        return items[:final_k]
+    reordered: list[RetrievedItem] = []
+    for index, score in ranking[:final_k]:
+        item = items[index]
+        item.score = score      # 分数改由重排模型给出，前端引用排序随之一致
+        reordered.append(item)
+    return reordered
+
+
 async def search_layered(
     project_id: str, query: str, question_type: str = "local", top_k: int | None = None
 ) -> list[RetrievedItem]:
     """分层混合检索主入口（spec: 向量检索 MODIFIED）。
 
     global: module + file 摘要层为主 → 下钻代表块；local: chunk 为主 + file 辅助。
+    M7：配置了 rerank 时，RRF 之后、图扩展之前插入精排——图扩展带出的是结构邻居，
+    不该被文本相关性挤掉，所以精排只收敛主候选。impact 模式按图距离排序，不走精排。
     """
     k = top_k or settings.retrieval_top_k
     vec = await embedder.embed_query(query)
+    # impact 的检索只用来定位目标文件，排序语义是图距离（D2）
+    use_rerank = reranker.is_enabled() and question_type != "impact"
 
     if question_type == "global":
         module_hits = await _vector_query("module_summary_embedding", vec, project_id, 4)
@@ -210,7 +247,9 @@ async def search_layered(
             [_file_item(h["node"], h["score"]) for h in file_hits],
             [_chunk_item(h["node"], h["score"]) for h in chunk_hits] + reps,
         ]
-        merged = _rrf_merge(routes, top_k=k + 4)
+        final_k = k + 4
+        pool = final_k * settings.rerank_candidate_multiplier if use_rerank else final_k
+        merged = _rrf_merge(routes, top_k=pool)
     else:
         chunk_hits = await _vector_query("chunk_embedding", vec, project_id, k)
         file_hits = await _vector_query("file_summary_embedding", vec, project_id, max(2, k // 3))
@@ -218,7 +257,12 @@ async def search_layered(
             [_chunk_item(h["node"], h["score"]) for h in chunk_hits],
             [_file_item(h["node"], h["score"]) for h in file_hits],
         ]
-        merged = _rrf_merge(routes, top_k=k)
+        final_k = k
+        pool = final_k * settings.rerank_candidate_multiplier if use_rerank else final_k
+        merged = _rrf_merge(routes, top_k=pool)
+
+    if use_rerank:
+        merged = await _apply_rerank(query, merged, final_k)
 
     # 图扩展一跳（直接命中的 chunk）
     hit_chunk_ids = [i.node_id for i in merged if i.kind == "chunk" and i.via_edge is None]

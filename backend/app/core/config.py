@@ -26,6 +26,19 @@ class Settings(BaseSettings):
     summary_model: str = ""  # 摘要用模型，空则复用 chat_model
     summary_concurrency: int = 4
 
+    # M7 D2：检索精排。base_url/api_key/model 任一为空 = 关闭（行为与 M6 完全一致）。
+    # base_url 不带资源后缀，客户端自己拼 /rerank
+    rerank_base_url: str = ""
+    rerank_api_key: str = ""
+    rerank_model: str = ""
+    rerank_timeout_seconds: float = 5
+    rerank_max_chars: int = 1500      # 单篇文档截断：8B 重排模型上下文有限，长文不增益
+    rerank_candidate_multiplier: int = 3  # 候选池 = top_k × 这个倍数
+
+    @property
+    def rerank_enabled(self) -> bool:
+        return bool(self.rerank_base_url and self.rerank_api_key and self.rerank_model)
+
     # M4 D7：单次模型调用超时。不设时 SDK 默认 600s，一次挂起就能让整个阶段静止十分钟
     llm_timeout_seconds: float = 60
     embedding_timeout_seconds: float = 30

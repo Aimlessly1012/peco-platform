@@ -1,0 +1,79 @@
+# 生产部署（M7 D4）：与 Nginx 子路径 /rag 配套，和服务器上已有的 compose 项目共存。
+#
+# 与开发版 docker-compose.yml 的差别：
+#   - postgres / neo4j 不映射宿主端口（只在 compose 网络内互通，不对外暴露）
+#   - backend / frontend 只绑 127.0.0.1，流量一律经 Nginx 进来
+#   - restart: unless-stopped；没有源码卷挂载，跑的就是镜像里的代码
+#
+# 启动：docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: raguser
+      POSTGRES_PASSWORD: ragpass
+      POSTGRES_DB: ragcoder
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raguser -d ragcoder"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/ragcoder123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      # 4096 维向量 + 千文件级项目，堆给足；按服务器内存调整
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+    volumes:
+      - neo4jdata:/data
+    restart: unless-stopped
+    # 需要开 Neo4j Browser 排查时临时加：ports: ["127.0.0.1:7474:7474"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+      # Nginx 已剥掉 /rag/api 前缀，这里只用于 openapi.json / docs 的地址生成
+      ROOT_PATH: /rag/api
+    volumes:
+      - ./data/repos:/data/repos     # 仓库副本要持久化，重建容器不必重新 clone
+    ports:
+      - "127.0.0.1:8001:8000"        # 只监听回环，公网流量必须过 Nginx
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # NEXT_PUBLIC_* 是构建期变量，必须在 build 时注入，运行时改 env 无效
+        NEXT_PUBLIC_BASE_PATH: /rag
+        NEXT_PUBLIC_API_BASE: /rag/api
+    ports:
+      - "127.0.0.1:3300:3000"        # 3300 避开服务器上已有项目常用的 3000
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  neo4jdata:

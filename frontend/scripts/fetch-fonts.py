@@ -6,7 +6,7 @@
 
 做三件事：
 1. 以浏览器 UA 请求 Google Fonts CSS2（UA 决定返回 woff2 还是 ttf）；
-2. 把其中每个 @font-face 的字体文件下载到 public/fonts/，文件名语义化；
+2. 把其中每个 @font-face 的字体文件下载到 fonts/，文件名语义化；
 3. 生成 app/fonts.css —— 与线上 CSS 等价，只是 src 指向本地，unicode-range 原样保留。
 
 只有需要换字体/换字重/升级字体版本时才需要重跑；日常构建不依赖本脚本。
@@ -35,7 +35,9 @@ UA = (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-FONT_DIR = ROOT / "public" / "fonts"
+# 字体放 frontend/fonts/ 而不是 public/：public 里的绝对路径不受 basePath 影响，
+# 子路径部署（NEXT_PUBLIC_BASE_PATH=/rag）时会全部 404。走 webpack 才会带上前缀。
+FONT_DIR = ROOT / "fonts"
 CSS_OUT = ROOT / "app" / "fonts.css"
 
 FACE = re.compile(r"@font-face\s*\{(?P<body>.*?)\}", re.S)
@@ -92,7 +94,7 @@ def parse(css: str) -> list[dict]:
 
 def render_css(rows: list[dict]) -> str:
     out = [
-        "/* 本地字体：原先从 Google Fonts CDN 引入，现自托管于 public/fonts/。",
+        "/* 本地字体：原先从 Google Fonts CDN 引入，现自托管于 frontend/fonts/（经 webpack 打包）。",
         " * 本文件由 scripts/fetch-fonts.py 生成，请勿手改。",
         " * 保留了原始 unicode-range 分片，浏览器只下载页面实际命中的分片。",
         " */",
@@ -105,7 +107,7 @@ def render_css(rows: list[dict]) -> str:
             f"  font-style: {r['style']};",
             f"  font-weight: {r['weight']};",
             f"  font-display: {r['display']};",
-            f"  src: url('/fonts/{r['file']}') format('woff2');",
+            f"  src: url('../fonts/{r['file']}') format('woff2');",
         ]
         if r["urange"]:
             out.append(f"  unicode-range: {r['urange']};")

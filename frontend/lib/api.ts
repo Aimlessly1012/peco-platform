@@ -1,6 +1,20 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8001";
 
+/**
+ * MCP 端点地址。
+ *
+ * 子路径部署时 API_BASE 是相对路径（如 `/rag/api`），页面内的 fetch 没问题，
+ * 但「claude mcp add」是拿去命令行执行的，必须是带域名的绝对 URL——
+ * 所以在浏览器端传入 window.location.origin 补全。SSR 阶段没有 origin，
+ * 先渲染相对形式，挂载后再替换，两端首帧一致不触发 hydration 警告。
+ */
+export function mcpEndpoint(origin?: string): string {
+  const base = API_BASE.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(base)) return `${base}/mcp`;
+  return `${origin ?? ""}${base}/mcp`;
+}
+
 /** 索引深度（M5）：deep 走 LLM 全量理解，fast 只做结构与代码检索。 */
 export type IndexDepth = "deep" | "fast";
 

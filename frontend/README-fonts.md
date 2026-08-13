@@ -6,12 +6,14 @@
 
 | 路径 | 说明 |
 |---|---|
-| `public/fonts/*.woff2` | 318 个字体分片，约 13 MB。由 Next 以 `/fonts/xxx.woff2` 静态提供 |
+| `fonts/*.woff2` | 318 个字体分片，约 13 MB。经 webpack 打包到 `.next/static/media/`（带内容 hash） |
 | `app/fonts.css` | 318 条 `@font-face`，**由脚本生成，不要手改** |
 | `scripts/fetch-fonts.py` | 抓取/更新字体的脚本 |
 | `app/layout.tsx` | `import "./fonts.css"` 在 `globals.css` 之前引入 |
 
 `tailwind.config.ts` 的 `fontFamily.mono` 引用这两个字体族，`globals.css` 把 `font-mono` 应用到 `body`。
+
+**字体为什么不放 `public/`**：`public/` 里的文件只能用绝对路径 `/fonts/x.woff2` 引用，而 Next 的 `basePath` 不会重写 CSS 里的绝对 URL——子路径部署（`NEXT_PUBLIC_BASE_PATH=/rag`）时这些请求会打到 `/fonts/...` 而不是 `/rag/fonts/...`，全部 404。放在 `fonts/` 由 webpack 处理后，产物 URL 变成 `/rag/_next/static/media/xxx.<hash>.woff2`，前缀自动跟随，还白拿了内容 hash 长期缓存。
 
 ## 为什么是 318 个文件
 
@@ -32,9 +34,9 @@ Google Fonts 把中文字体按 `unicode-range` 切成上百个分片，这是�
 python3 scripts/fetch-fonts.py
 ```
 
-脚本会重新拉取 Google Fonts CSS、下载全部 woff2 到 `public/fonts/`、清理不再需要的旧文件，并重新生成 `app/fonts.css`。只用 Python 标准库，无需额外依赖。改字体族或字重请先改脚本顶部的 `CSS_URL`，并同步 `tailwind.config.ts` 的 `fontFamily.mono`。
+脚本会重新拉取 Google Fonts CSS、下载全部 woff2 到 `fonts/`、清理不再需要的旧文件，并重新生成 `app/fonts.css`。只用 Python 标准库，无需额外依赖。改字体族或字重请先改脚本顶部的 `CSS_URL`，并同步 `tailwind.config.ts` 的 `fontFamily.mono`。
 
-脚本是幂等的：字体没变时重跑，`public/fonts/` 的内容逐字节不变。
+脚本是幂等的：字体没变时重跑，`fonts/` 的内容逐字节不变。
 
 ## 许可
 

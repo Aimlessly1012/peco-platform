@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import "./fonts.css";
 import "./globals.css";
@@ -21,9 +22,9 @@ export default function RootLayout({
             <div className="flex h-full items-center gap-5 px-6">
               <div className="flex items-center gap-[9px]">
                 <span className="block h-[9px] w-[9px] bg-accent" />
-                <a href="/" className="text-sm font-semibold tracking-wide">
+                <Link href="/" className="text-sm font-semibold tracking-wide">
                   RAG&nbsp;CODER
-                </a>
+                </Link>
               </div>
               <TopNav />
               <div className="ml-auto hidden gap-[22px] text-[11px] text-muted md:flex">
