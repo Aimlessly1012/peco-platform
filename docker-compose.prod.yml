@@ -28,9 +28,9 @@ services:
       NEO4J_AUTH: neo4j/ragcoder123
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
-      # 4096 维向量 + 千文件级项目，堆给足；按服务器内存调整
-      NEO4J_server_memory_heap_max__size: 2G
-      NEO4J_server_memory_pagecache_size: 1G
+      # 4096 维向量；默认按 4G 小机保守配置，大内存服务器建议调到 2G/1G
+      NEO4J_server_memory_heap_max__size: 768M
+      NEO4J_server_memory_pagecache_size: 384M
     volumes:
       - neo4jdata:/data
     restart: unless-stopped
