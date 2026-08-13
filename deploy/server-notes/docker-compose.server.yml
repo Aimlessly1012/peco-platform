@@ -1,0 +1,14 @@
+# 服务器 override：把 RAG 前后端挂进 zc_erp 的网络，zc_erp-web 的 nginx 直连容器名
+# 用法：docker compose -f docker-compose.prod.yml -f docker-compose.server.yml up -d
+networks:
+  zc_erp_default:
+    external: true
+services:
+  backend:
+    networks:
+      - default
+      - zc_erp_default
+  frontend:
+    networks:
+      - default
+      - zc_erp_default

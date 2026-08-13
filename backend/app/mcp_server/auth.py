@@ -26,9 +26,16 @@ class MCPAuthMiddleware:
         self.token = token or ""
         self.path = path
 
-    def _guards(self, path: str) -> bool:
+    def _guards(self, scope) -> bool:
         """只拦 /mcp 与其子路径。注意不能用 startswith("/mcp")——
-        那会把 /mcp-info（接入说明页的数据源，恰恰是用来告诉用户如何配 token 的）也拦掉。"""
+        那会把 /mcp-info（接入说明页的数据源，恰恰是用来告诉用户如何配 token 的）也拦掉。
+
+        uvicorn --root-path 模式（子路径部署，M7）会把 root_path 拼进 scope["path"]
+        （/mcp 变 /rag/api/mcp），匹配前先剥掉——生产鉴权被绕过就是这么来的。"""
+        path = scope.get("path", "")
+        root = scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root):] or "/"
         return path == self.path or path.startswith(self.path + "/")
 
     def _authorized(self, scope) -> bool:
@@ -47,7 +54,7 @@ class MCPAuthMiddleware:
         if (
             not self.token
             or scope.get("type") != "http"
-            or not self._guards(scope.get("path", ""))
+            or not self._guards(scope)
             or self._authorized(scope)
         ):
             await self.app(scope, receive, send)

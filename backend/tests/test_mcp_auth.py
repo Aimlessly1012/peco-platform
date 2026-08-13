@@ -163,3 +163,34 @@ async def test_mcp_info_with_auth(api_client, monkeypatch):
     assert "Authorization: Bearer" in body["install_command"]
     # 不回显真实 token（说明页是公开的）
     assert "s3cret-token" not in json.dumps(body)
+
+
+async def test_root_path_deployment_still_guarded(authed_app):
+    """M7 生产事故回归：uvicorn --root-path 会把前缀拼进 scope["path"]
+    （/mcp 变 /rag/api/mcp），鉴权必须剥 root_path 后匹配，否则被整体绕过。"""
+    from app.mcp_server.auth import MCPAuthMiddleware
+
+    captured = {}
+
+    async def inner(scope, receive, send):
+        captured["reached"] = True
+
+    mw = MCPAuthMiddleware(inner, token="s3cret-token", path="/mcp")
+    sent = []
+
+    async def send(msg):
+        sent.append(msg)
+
+    async def receive():
+        return {"type": "http.request"}
+
+    # 子路径部署形态：path 含 root_path 前缀
+    scope = {"type": "http", "path": "/rag/api/mcp", "root_path": "/rag/api", "headers": []}
+    await mw(scope, receive, send)
+    assert "reached" not in captured           # 未带 token 必须被拦
+    assert sent[0]["status"] == 401
+
+    # 带对 token 放行
+    scope["headers"] = [(b"authorization", b"Bearer s3cret-token")]
+    await mw(scope, receive, send)
+    assert captured.get("reached") is True
