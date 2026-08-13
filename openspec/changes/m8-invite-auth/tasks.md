@@ -24,5 +24,5 @@
 
 - [x] V1 全量单测绿 + 前后端 build + 容器代码核验
 - [x] V2 本地全流程：admin 登录 → 生成邀请码 → 无痕注册 member → member 建项目/聊天可用、删项目 403、邀请码页被拒；会话互不可见；未登录全站跳登录
-- [ ] V3 服务器上线：.env 补 ADMIN_* → 重建 backend/frontend → 公网复测登录/注册/聊天 SSE；MCP token 接入回归不受影响
-- [ ] V4 提交；归档由用户触发
+- [x] V3 服务器上线：.env 补 ADMIN_* → 重建 backend/frontend → 公网复测登录/注册/聊天 SSE；MCP token 接入回归不受影响
+- [x] V4 提交；归档由用户触发
