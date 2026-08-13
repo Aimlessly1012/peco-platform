@@ -42,7 +42,7 @@ services:
     volumes:
       - ./data/repos:/data/repos
     ports:
-      - "8001:8000"   # 宿主 8001（本机 8000 已被其他服务占用）
+      - "9200:8000"   # 宿主 9200（本机 8000/8001 已被其他服务占用）
     depends_on:
       db:
         condition: service_healthy
@@ -52,9 +52,9 @@ services:
   frontend:
     build: ./frontend
     environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:8001
+      NEXT_PUBLIC_API_BASE: http://localhost:9200
     ports:
-      - "3000:3000"
+      - "3200:3000"
     depends_on:
       - backend
 

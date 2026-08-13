@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="RAG Coder", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=["http://localhost:3200"],
         allow_methods=["*"],
         allow_headers=["*"],
     )

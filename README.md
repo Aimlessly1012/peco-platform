@@ -21,10 +21,10 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-打开 http://localhost:3000。
+打开 http://localhost:3200。
 
-- 后端 API: http://localhost:8001（宿主 8001 → 容器 8000；本机 8000 已被其他服务占用）
-- MCP 端点: http://localhost:8001/mcp
+- 后端 API: http://localhost:9200（宿主 9200 → 容器 8000；本机 8000/8001 已被其他服务占用）
+- MCP 端点: http://localhost:9200/mcp
 - Neo4j Browser: http://localhost:7474（neo4j / ragcoder123）
 - Postgres: localhost:5433（raguser / ragpass）
 
@@ -88,13 +88,13 @@ parse 阶段按框架探测器链解析路由并划分功能模块，前后端�
 ## MCP 接入
 
 ```bash
-claude mcp add --transport http rag-coder http://localhost:8001/mcp
+claude mcp add --transport http rag-coder http://localhost:9200/mcp
 ```
 
 开启鉴权后（见下）需带上 header：
 
 ```bash
-claude mcp add --transport http rag-coder http://localhost:8001/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http rag-coder http://localhost:9200/mcp --header "Authorization: Bearer <token>"
 ```
 
 七个工具：`list_projects`、`get_project_overview`、`get_module_map`、`search_code`、`get_file_summary`、`impact_analysis`（多跳影响面，`max_depth` 默认 2、上限 3）、`get_project_understanding`。`GET /mcp-info` 返回当前实例的接入命令与工具清单（前端 `/mcp-guide` 页的数据源）。

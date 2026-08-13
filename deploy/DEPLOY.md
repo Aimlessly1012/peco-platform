@@ -232,5 +232,5 @@ curl -X POST "http://127.0.0.1:8001/projects/<项目 id>/index?mode=full"
 ## 附录 B：本地开发不受影响
 
 所有路径类 env 默认为空，`docker compose up`（开发版）的本机形态与之前完全一致：
-前端 `http://localhost:3000`、后端 `http://localhost:8001`、无子路径、无 rerank
+前端 `http://localhost:3200`、后端 `http://localhost:9200`、无子路径、无 rerank
 （`RERANK_*` 留空即关闭）。
