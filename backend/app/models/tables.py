@@ -114,6 +114,8 @@ class UnderstandingReport(Base):
     dataflow_mermaid: Mapped[str | None] = mapped_column(Text, default=None)
     # M6：业务流程图 [{title, mermaid, fallback_text}]。fast 与旧报告为 NULL
     business_flows_json: Mapped[list | None] = mapped_column(JSON, default=None)
+    # M6 B7：页面结构导图（markdown）。deep 与 fast 都生成，旧报告为 NULL
+    page_map_markdown: Mapped[str | None] = mapped_column(Text, default=None)
     sequences_json: Mapped[list] = mapped_column(JSON, default=list)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

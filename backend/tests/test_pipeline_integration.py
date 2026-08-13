@@ -93,6 +93,8 @@ async def _index_fixture(project_id: str, fake_embedder, fake_summarizer):
             agg_hash=module_agg_hash(
                 [f.content_hash for f in files if module_key(m) in f.modules]
             ),
+            # 与 pipeline 的写法保持一致（M6 B7），否则集成测试覆盖不到路由写入
+            route_paths=[f"{path}|{entry}" for path, entry in m.route_paths],
             summary_embedding=(
                 await fake_embedder.embed_texts(
                     [module_summaries.get(module_key(m), m.name)]

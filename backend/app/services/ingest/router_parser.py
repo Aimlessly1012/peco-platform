@@ -53,6 +53,9 @@ class RouteModule:
     kind: str            # page | api | dir | shared
     route_prefix: str
     entry_files: list[str] = field(default_factory=list)
+    # M6 B7：页面级路由 [(route_path, entry_file)]，页面结构导图按 path 段建树。
+    # 探测器本来就算出了每个页面的 path，此前只用于分组就丢掉了
+    route_paths: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -133,6 +136,7 @@ def _detect_nextjs(root: str, files: list[str], repo_files: dict[str, str]) -> l
             RouteModule(
                 name=seg, kind=kind, route_prefix=route_prefix,
                 entry_files=sorted({f for _, f in items}),
+                route_paths=sorted({(route, f) for route, f in items}),
             )
         )
     return modules
@@ -276,16 +280,17 @@ def _detect_umi(
     if not routes:
         return None
 
-    groups: dict[str, set[str]] = {}
+    groups: dict[str, set[tuple[str, str]]] = {}
     for route, entry in routes:
-        groups.setdefault(_top_segment(route), set()).add(entry)
+        groups.setdefault(_top_segment(route), set()).add((route, entry))
     return [
         RouteModule(
             name=seg, kind="page",
             route_prefix="/" + seg if seg != "home" else "/",
-            entry_files=sorted(fs),
+            entry_files=sorted({entry for _, entry in items}),
+            route_paths=sorted(items),
         )
-        for seg, fs in sorted(groups.items())
+        for seg, items in sorted(groups.items())
     ]
 
 
@@ -302,7 +307,7 @@ def _detect_react_router(root: str, files: list[str], repo_files: dict[str, str]
     if not config_files:
         return None
 
-    groups: dict[str, set[str]] = {}
+    groups: dict[str, set[tuple[str, str]]] = {}
     for cf in config_files:
         src = _read(repo_files, cf)
         paths = [m.group("path") for m in JSX_ROUTE_RE.finditer(src)]
@@ -310,16 +315,17 @@ def _detect_react_router(root: str, files: list[str], repo_files: dict[str, str]
         if not paths:
             continue
         for p in paths:
-            groups.setdefault(_top_segment(p), set()).add(cf)
+            groups.setdefault(_top_segment(p), set()).add((p, cf))
     if not groups:
         return None
     return [
         RouteModule(
             name=seg, kind="page",
             route_prefix="/" + seg if seg != "home" else "/",
-            entry_files=sorted(fs),
+            entry_files=sorted({cf for _, cf in items}),
+            route_paths=sorted(items),
         )
-        for seg, fs in sorted(groups.items())
+        for seg, items in sorted(groups.items())
     ]
 
 

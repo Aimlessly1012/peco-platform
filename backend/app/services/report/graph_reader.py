@@ -25,6 +25,8 @@ class ModuleNode:
     route_prefix: str = ""
     summary: str = ""
     agg_hash: str = ""       # 模块内文件 hash 聚合（L3 与功能点共用的缓存键）
+    # M6 B7：[(route_path, entry_file)]。老数据没有该属性时为空，页面导图从入口文件反推
+    route_paths: list[tuple[str, str]] = field(default_factory=list)
     files: list[FileNode] = field(default_factory=list)
 
 
@@ -78,6 +80,18 @@ class ModuleEdge:
     count: int
 
 
+def _decode_route_paths(raw) -> list[tuple[str, str]]:
+    """Module.route_paths 存的是 "<route path>|<entry file>" 编码串（M6 B7）。"""
+    decoded: list[tuple[str, str]] = []
+    for item in raw or []:
+        if not item or "|" not in item:
+            continue
+        path, entry = item.split("|", 1)
+        if path:
+            decoded.append((path, entry))
+    return decoded
+
+
 def _module_key_from_node(node_name: str) -> str:
     """节点名形如 "{project_id}:module:{kind}:{name}"，取 ":module:" 之后为唯一键。"""
     marker = ":module:"
@@ -107,7 +121,7 @@ async def read_project_tree(project_id: str) -> ProjectTree:
             WITH m, f ORDER BY f.path
             RETURN m.name AS node_name, m.module_name AS name, m.kind AS kind,
                    m.route_prefix AS prefix, m.summary AS summary,
-                   m.agg_hash AS agg_hash,
+                   m.agg_hash AS agg_hash, m.route_paths AS route_paths,
                    collect(f {.path, .language, .summary}) AS files
             ORDER BY m.kind, m.module_name
             """,
@@ -131,6 +145,7 @@ async def read_project_tree(project_id: str) -> ProjectTree:
                     route_prefix=rec["prefix"] or "",
                     summary=rec["summary"] or "",
                     agg_hash=rec["agg_hash"] or "",
+                    route_paths=_decode_route_paths(rec["route_paths"]),
                     files=files,
                 )
             )

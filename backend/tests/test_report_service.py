@@ -47,18 +47,28 @@ def stub_graph(monkeypatch):
         state["saved_features"] = points_by_hash
         return len(points_by_hash)
 
+    async def fake_load_groups(project_id: str):
+        return dict(state["group_cache"])
+
+    async def fake_save_groups(project_id: str, signature: str, groups: dict):
+        state["saved_groups"] = {"sig": signature, "groups": groups}
+
     state["anchors"] = {
         "api:orders": ["backend/routers/orders.py（create_order, list_orders）"],
         "page:orders": ["frontend/pages/orders.tsx（OrdersPage）"],
     }
     state["feature_cache"] = {}
     state["saved_features"] = {}
+    state["group_cache"] = {}
+    state["saved_groups"] = {}
     monkeypatch.setattr("app.services.report.service.read_project_tree", fake_tree)
     monkeypatch.setattr("app.services.report.service.read_graph_edges", fake_edges)
     monkeypatch.setattr("app.services.report.service.read_module_edges", fake_module_edges)
     monkeypatch.setattr("app.services.report.service.read_module_anchors", fake_anchors)
     monkeypatch.setattr("app.services.report.service.load_feature_cache", fake_feature_cache)
     monkeypatch.setattr("app.services.report.service.save_module_features", fake_save_features)
+    monkeypatch.setattr("app.services.report.service.load_feature_groups", fake_load_groups)
+    monkeypatch.setattr("app.services.report.service.save_feature_groups", fake_save_groups)
     return state
 
 

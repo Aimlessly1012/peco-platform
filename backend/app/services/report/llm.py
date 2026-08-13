@@ -52,6 +52,22 @@ OVERVIEW_PROMPT = """你是资深软件架构师。基于以下信息写《需�
 已生成的模块章节标题：
 {chapter_titles}"""
 
+GROUP_PROMPT = """你是资深产品经理。下面是一个软件产品的全部功能域清单，\
+请把它们按**业务归属**分组，用于画产品功能思维导图的中间层级。
+
+严格要求（不满足会被判为无效）：
+1. 只输出 JSON，不要解释、不要代码围栏，格式：{{"业务组名": ["功能域名", ...], ...}}
+2. 组名用中文业务词（如「任务中心」「活动奖励」「内容分享」「账号与权限」），\
+禁止技术词（模块、服务、组件、接口、页面、后台、前端）
+3. 分成 {min_groups}-{max_groups} 组；命名相近的功能域要归到同一组\
+（例如 taskCenter、taskCenterDetail、taskList 都属于「任务中心」）
+4. 每个功能域必须且只能出现一次，名称必须与清单里的**完全一致**，不要改写或翻译
+5. 不要遗漏任何功能域；实在归不了类的放进「其他」组
+
+功能域清单（共 {count} 个）：
+{domain_lines}"""
+
+
 FEATURE_PROMPT = """你是资深产品经理。下面是某个软件模块的静态分析结果，请提炼这个模块\
 **对用户提供了哪些功能**，用于画产品功能思维导图。
 
@@ -194,6 +210,18 @@ class ReportLLM:
             chapter_titles=chapter_titles[:2000] or "（无章节）",
         )
         return await self._complete(prompt, max_tokens=2500)
+
+    async def group_domains(
+        self, domain_lines: str, count: int, min_groups: int = 3, max_groups: int = 10
+    ) -> str | None:
+        """功能域业务归组（M6 B6）：单次调用，输出 JSON。"""
+        prompt = GROUP_PROMPT.format(
+            count=count, domain_lines=domain_lines[:6000],
+            min_groups=min_groups, max_groups=max_groups,
+        )
+        # 推理开销随域数增长且波动大：55 域实测 4000 全被 reasoning 吃光（content 空），
+        # 12250 也偶发三连空。按域数线性放宽，计费按实际用量，给宽不增加成本
+        return await self._complete(prompt, max_tokens=min(6000 + 200 * count, 16000))
 
     async def generate_features(
         self, name: str, kind_label: str, route_prefix: str, summary: str, anchors: str

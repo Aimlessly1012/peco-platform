@@ -169,6 +169,9 @@ async def test_build_report_end_to_end(indexed_project):
     assert result.doc_markdown.startswith("# mini-shop")
     # M6 B5：业务流程图（L4 无「核心业务流」小节时退回整段总览作为输入）
     assert result.stats["business_flows_ok"] + result.stats["business_flows_fallback"] >= 1
+    # M6 B7：页面结构导图（mini_repo 的前端页面来自真实 route_paths 或反推）
+    assert result.page_map_markdown.startswith("#")
+    assert "## " in result.page_map_markdown
     assert result.stats["report_modules"] == len(tree.modules)
     assert result.stats["sequences_ok"] == len(core)
     assert result.stats["doc_fallback"] is False
@@ -282,3 +285,19 @@ async def test_fast_report_is_programmatic_only(indexed_project):
     assert result.doc_markdown == ""
     assert result.sequences == []
     assert llm.chapter_calls == [] and llm.seq_calls == []
+
+
+async def test_route_paths_survive_the_graph(indexed_project):
+    """M6 B7：探测器算出的页面 path 必须能写进图再读回（此前只用于分组就丢了）。"""
+    pid, files, _ = indexed_project
+    tree = await read_project_tree(pid)
+    pages = [m for m in tree.modules if m.kind == "page"]
+
+    assert pages, "mini_repo 有前端页面模块"
+    real_paths = {f.path for f in files}
+    with_routes = [m for m in pages if m.route_paths]
+    assert with_routes, "page 模块应带上 route_paths"
+    for module in with_routes:
+        for route, entry in module.route_paths:
+            assert route.startswith("/")
+            assert entry in real_paths, f"路由指向图中不存在的文件：{entry}"

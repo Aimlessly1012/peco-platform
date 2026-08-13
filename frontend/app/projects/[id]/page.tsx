@@ -430,7 +430,7 @@ export default function ProjectDetailPage({
             <ModulesTab
               modules={modules}
               error={modulesError}
-              structureMermaid={report?.mindmap_mermaid ?? ""}
+              projectName={project?.name ?? ""}
               dataflowMermaid={report?.dataflow_mermaid ?? ""}
             />
           )}
@@ -548,7 +548,12 @@ function UnderstandingTab({
         {report.feature_map_markdown?.trim() ? (
           <MarkmapView
             title="需求功能思维导图"
-            subtitle="产品定位 → 功能域 → 功能点，初始展开到功能域层"
+            // 归组降级时后端只出三层（无 ### 功能域），文案跟着实际结构走
+            subtitle={
+              /^###\s/m.test(report.feature_map_markdown)
+                ? "产品定位 → 业务组 → 功能域 → 功能点，初始展开到业务组，逐层点开"
+                : "产品定位 → 功能域 → 功能点，初始展开到功能域，逐层点开"
+            }
             markdown={report.feature_map_markdown}
           />
         ) : (
@@ -565,6 +570,17 @@ function UnderstandingTab({
           </>
         )}
       </section>
+
+      {report.page_map_markdown?.trim() ? (
+        <section className="flex flex-col gap-2.5">
+          <SectionLabel text="PAGE MAP 页面结构导图" />
+          <MarkmapView
+            title="页面结构导图"
+            subtitle="页面与路由层级，初始展开一层，逐层点开"
+            markdown={report.page_map_markdown}
+          />
+        </section>
+      ) : null}
 
       {report.business_flows?.length ? (
         <section className="flex flex-col gap-2.5">
@@ -768,18 +784,36 @@ function ModuleMindmap({ modules }: { modules: ModuleInfo[] | null }) {
   );
 }
 
+/** 结构导图 markdown：模块地图数据本地拼装，与功能导图共用 markmap 交互（用户反馈）。 */
+function buildStructureMarkdown(
+  projectName: string,
+  groups: { kind: string; list: ModuleInfo[] }[]
+): string {
+  const lines = [`# ${projectName || "项目"}：模块结构`, ""];
+  for (const g of groups) {
+    lines.push(`## ${moduleKindMeta(g.kind).label}`);
+    for (const m of g.list) {
+      const bits = [m.route_prefix, `${m.files?.length ?? 0} 个文件`]
+        .filter(Boolean)
+        .join(" · ");
+      lines.push(`### ${m.name}${bits ? `（${bits}）` : ""}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 /** 页签二：功能地图（模块按 kind 分组，展开看文件与 L2 摘要）。 */
 function ModulesTab({
   modules,
   error,
-  structureMermaid,
+  projectName,
   dataflowMermaid,
 }: {
   modules: ModuleInfo[] | null;
   error: string;
-  /** M6：结构导图（Project→Module）从项目理解页签移到这里，技术视角归技术页签。 */
-  structureMermaid: string;
-  /** M6：模块数据流图同理归入本页签。 */
+  projectName: string;
+  /** M6：模块数据流图归入本页签。 */
   dataflowMermaid: string;
 }) {
   if (error) return <ErrorCard message={error} />;
@@ -804,17 +838,11 @@ function ModulesTab({
     <div className="flex flex-col gap-7">
       <section className="flex flex-col gap-2.5">
         <SectionLabel text="STRUCTURE 模块结构导图" />
-        {structureMermaid.trim() ? (
-          <MermaidDiagram
-            title="模块结构导图"
-            subtitle="由图谱中的 项目 → 模块 结构程序化生成"
-            code={structureMermaid}
-          />
-        ) : (
-          <div className="border border-dashed border-line py-10 text-center text-[11px] text-faint">
-            尚无结构导图（重新索引后生成）
-          </div>
-        )}
+        <MarkmapView
+          title="模块结构导图"
+          subtitle="项目 → 模块类型 → 模块，初始展开到类型层，逐层点开"
+          markdown={buildStructureMarkdown(projectName, groups)}
+        />
         <ModuleMindmap modules={modules} />
       </section>
 
@@ -842,7 +870,8 @@ function ModulesTab({
                 {g.list.length} MODULES
               </span>
             </div>
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {/* items-start：矮卡片不被同行高卡片拉出大片空白（用户反馈） */}
+            <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
               {g.list.map((m) => (
                 <ModuleCard key={`${m.kind}:${m.name}`} module={m} />
               ))}
@@ -871,7 +900,8 @@ function ModuleCard({ module: m }: { module: ModuleInfo }) {
         </span>
       </div>
 
-      <p className="mt-2 whitespace-pre-wrap text-[12px] leading-relaxed text-ink2">
+      {/* overflow-wrap:anywhere——摘要「核心文件」行是逗号相连的长路径串，无断点会顶破卡片 */}
+      <p className="mt-2 whitespace-pre-wrap text-[12px] leading-relaxed text-ink2 [overflow-wrap:anywhere]">
         {m.summary?.trim() || "（暂无模块摘要）"}
       </p>
 

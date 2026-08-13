@@ -73,6 +73,11 @@ export interface UnderstandingReport {
    * 由 markmap 渲染。旧报告为 null，前端回退渲染 mindmap_mermaid。
    */
   feature_map_markdown?: string | null;
+  /**
+   * M6 新增：页面结构导图的 markdown 层级文本，同样由 markmap 渲染。
+   * 旧报告为 null/缺省，前端隐藏该卡片。
+   */
+  page_map_markdown?: string | null;
   /** M6 新增：业务流程图列表。旧报告为 null/缺省，前端隐藏该区块。 */
   business_flows?: BusinessFlow[] | null;
   /** M5 新增：模块间数据流 flowchart。旧报告为空/缺省，前端隐藏该卡片。 */

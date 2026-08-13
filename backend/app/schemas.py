@@ -68,6 +68,7 @@ class ReportOut(BaseModel):
     doc_markdown: str
     feature_map_markdown: str = ""  # 需求功能思维导图（markmap 渲染）
     business_flows: list[BusinessFlowOut] = []  # 业务流程图（需求方向）
+    page_map_markdown: str = ""     # 页面结构导图（markmap 渲染）
     mindmap_mermaid: str = ""       # 模块结构导图（功能地图页签）
     dataflow_mermaid: str = ""
     sequences: list[SequenceOut]

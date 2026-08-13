@@ -10,7 +10,7 @@ import CopyButton from "./CopyButton";
  * 约定：
  * - markmap 体积大且强依赖浏览器 API，只在 effect 里动态 import（模块顶层不 import，天然不参与 SSR）；
  * - transform / create 全程 try/catch，失败回退成 markdown 文本渲染，绝不白屏；
- * - 初始展开到功能域层，功能点收起；工具条可展开全部 / 收起 / 适应窗口 / 复制源码；
+ * - 初始只展开根的直接子级，其余逐层点开；工具条可展开全部 / 收起 / 适应窗口 / 复制源码；
  * - 复制的是后端给的原始 markdown（不是从渲染树反推），可直接粘进 XMind。
  */
 
@@ -48,10 +48,15 @@ function loadMarkmap(): Promise<MarkmapApi> {
 }
 
 /**
- * markmap 的 initialExpandLevel 语义是「折叠 depth ≥ N 的节点」，且 depth 从 1 起算
- * （root=1、功能域=2、功能点=3）。实测：2 = 展开到功能域层，-1 = 全展开。
+ * markmap 的 initialExpandLevel 语义是「折叠 depth ≥ N 的节点」，depth 从 1 起算。
+ * 所以 2 = 只展开根的直接子级，剩下的逐层点开；-1 = 全展开。
+ *
+ * 实测（三层与四层产物都验过）：
+ * - 四层 `# 产品 / ## 业务组 / ### 功能域 / - 功能点` → 停在业务组层
+ * - 三层 `# 产品 / ## 功能域 / - 功能点`（归组降级）→ 停在功能域层
+ * 两种结构用同一个值就对，不必按 `###` 探测层数。
  */
-const EXPAND_DOMAIN = 2;
+const EXPAND_DEFAULT = 2;
 const EXPAND_ALL = -1;
 
 /** 收敛到终端风设计令牌，与 tailwind.config.ts 的色值保持一致。 */
@@ -78,11 +83,14 @@ export default function MarkmapView({
   title,
   subtitle,
   height = 520,
+  initialExpandLevel = EXPAND_DEFAULT,
 }: {
   markdown: string;
   title: string;
   subtitle?: string | null;
   height?: number;
+  /** 初始展开层级，语义见 EXPAND_DEFAULT 注释；「收起」按钮也回到这一层。 */
+  initialExpandLevel?: number;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const mmRef = useRef<MarkmapInstance | null>(null);
@@ -111,13 +119,13 @@ export default function MarkmapView({
         const mm = Markmap.create(
           svgRef.current,
           {
-            initialExpandLevel: EXPAND_DOMAIN,
+            initialExpandLevel,
             duration: 200,
             maxWidth: 320,
             spacingVertical: 8,
             spacingHorizontal: 90,
             paddingX: 12,
-            // 层级配色：项目 → 功能域 → 功能点，深度越浅越重
+            // 层级配色：根 → 第二层 → 更深层，越浅越重
             color: (node) =>
               node.state.depth <= 1 ? INK : node.state.depth === 2 ? ACCENT : MUTED,
             lineWidth: (node) => (node.state.depth <= 1 ? 2 : 1),
@@ -166,7 +174,7 @@ export default function MarkmapView({
       // destroy 不清空宿主 svg，留着会和下一次 create 的内容叠在一起
       if (svgRef.current) svgRef.current.innerHTML = "";
     };
-  }, [source]);
+  }, [source, initialExpandLevel]);
 
   /** 重设展开层级：markmap 会变异传入的树，所以每次都给一份新副本。 */
   const applyExpand = useCallback((level: number) => {
@@ -207,7 +215,7 @@ export default function MarkmapView({
           </button>
           <button
             type="button"
-            onClick={() => applyExpand(EXPAND_DOMAIN)}
+            onClick={() => applyExpand(initialExpandLevel)}
             disabled={state !== "ok"}
             className={toolButton}
           >

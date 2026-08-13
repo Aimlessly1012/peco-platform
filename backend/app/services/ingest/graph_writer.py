@@ -8,6 +8,7 @@ M2 图 schema：
 所有节点带 project_id 属性做项目隔离。
 """
 import asyncio
+import json
 from dataclasses import dataclass, field
 
 from llama_index.core.graph_stores.types import EntityNode, Relation
@@ -57,6 +58,9 @@ class ModuleInfo:
     summary: str = ""
     agg_hash: str = ""
     summary_embedding: list[float] | None = None
+    # M6 B7：页面级路由 ["<route path>|<entry file>"]。Neo4j 属性只收基本类型数组，
+    # 故编码成字符串；老数据没有该属性时页面导图从入口文件路径反推
+    route_paths: list[str] = field(default_factory=list)
 
 
 def file_node_name(project_id: str, path: str) -> str:
@@ -289,6 +293,7 @@ def _write_sync(
                 "route_prefix": m.route_prefix,
                 "summary": m.summary,
                 "agg_hash": m.agg_hash,
+                "route_paths": m.route_paths,
             },
         )
         for m in modules
@@ -408,3 +413,43 @@ async def write_project_graph(
         modules, files, chunks, context_texts, embeddings, api_edges, embed_keys,
         edge_files, edge_chunks,
     )
+
+
+async def load_feature_groups(project_id: str) -> dict[str, dict[str, list[str]]]:
+    """功能域归组缓存（M6 B6）：{功能域集合 hash: {组名: [成员]}}。
+
+    结构没变就复用上次归组结果，避免每次重索引都重新分一遍（分法还可能不一致）。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (p:Project {project_id: $pid})
+            RETURN p.feature_groups_sig AS sig, p.feature_groups_json AS groups LIMIT 1
+            """,
+            pid=project_id,
+        )
+        record = await result.single()
+        if record is None or not record["sig"] or not record["groups"]:
+            return {}
+        try:
+            return {record["sig"]: json.loads(record["groups"])}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+
+async def save_feature_groups(
+    project_id: str, signature: str, groups: dict[str, list[str]]
+) -> None:
+    if not signature or not groups:
+        return
+    driver = get_driver()
+    async with driver.session() as session:
+        await session.run(
+            """
+            MATCH (p:Project {project_id: $pid})
+            SET p.feature_groups_sig = $sig, p.feature_groups_json = $groups
+            """,
+            pid=project_id, sig=signature,
+            groups=json.dumps(groups, ensure_ascii=False),
+        )

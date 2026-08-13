@@ -4,6 +4,8 @@
 "拼装"这一步属于必然成功档；只有"提取"这一步会调 LLM，且失败只降级单个功能域。
 """
 import asyncio
+import hashlib
+import json
 import logging
 import re
 
@@ -33,6 +35,14 @@ BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.、)])\s*")
 SOURCE_LLM = "llm"
 SOURCE_FALLBACK = "fallback"
 SOURCE_FAST = "fast"
+
+# ---- 业务归组（M6 B6）----
+GROUP_THRESHOLD = 8    # 功能域 >8 才归组：少于这个数平铺本来就看得过来
+MIN_GROUPS = 3
+MAX_GROUPS = 10
+OTHER_GROUP = "其他"
+GROUP_TECH_WORDS = ("模块", "服务", "组件", "接口", "页面", "后台", "前端", "module", "service")
+JSON_BLOCK_RE = re.compile(r"\{.*\}", re.S)
 
 
 def _clean_point(raw: str) -> str | None:
@@ -194,6 +204,7 @@ async def generate_feature_map(
     llm,
     cache: dict[str, list[str]] | None = None,
     fast: bool = False,
+    group_cache: dict[str, dict[str, list[str]]] | None = None,
 ) -> tuple[str, dict[str, list[str]], dict]:
     """生成功能导图，返回 (markdown, 可缓存的功能点, stats)。
 
@@ -230,4 +241,182 @@ async def generate_feature_map(
         else:
             stats["feature_points_fallback"] += 1
 
-    return build_feature_map(tree, points_by_key), cacheable, stats
+    # M6 B6：功能域多时加「业务组」层，49 个平铺一排读不了
+    titles = domain_titles(domains)
+    groups, group_source = (
+        ({}, "none") if fast
+        else await group_feature_domains(domains, titles, llm, cache=group_cache)
+    )
+    stats["feature_groups"] = len(groups)
+    stats["feature_groups_source"] = group_source
+    if groups:
+        markdown = build_grouped_feature_map(tree, points_by_key, groups)
+    else:
+        markdown = build_feature_map(tree, points_by_key)
+    stats["_feature_groups"] = groups if group_source == "llm" else {}
+    stats["_feature_groups_sig"] = domains_signature(domains)
+    stats["_points_by_key"] = points_by_key   # 页面导图要按 module.key 取功能点
+    return markdown, cacheable, stats
+
+
+# ---------------- 功能域业务归组（M6 B6） ----------------
+
+
+def domains_signature(domains: list[ModuleNode]) -> str:
+    """归组缓存键：功能域名称集合的 hash——模块结构没变就复用上次的归组。"""
+    joined = "|".join(sorted(f"{m.kind}:{m.name}" for m in domains))
+    return hashlib.sha256(joined.encode()).hexdigest()[:16]
+
+
+def build_group_input(domains: list[ModuleNode], titles: dict[str, str]) -> str:
+    """归组输入：功能域名 + 类型 + L3 业务目标首句。"""
+    lines = []
+    for module in domains:
+        goal = ""
+        for line in (module.summary or "").splitlines():
+            if line.strip().startswith("业务目标"):
+                goal = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                break
+        if not goal:
+            goal = re.split(r"[。\n]", (module.summary or "").strip())[0][:40]
+        lines.append(
+            f"- {titles[module.key]}（{KIND_LABEL.get(module.kind, module.kind)}）"
+            f"：{goal or '（无摘要）'}"
+        )
+    return "\n".join(lines)
+
+
+def parse_groups(raw: str) -> dict[str, list[str]]:
+    """解析归组 JSON（容忍围栏与前后缀文字）。"""
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    match = JSON_BLOCK_RE.search(text)
+    if match is None:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    groups: dict[str, list[str]] = {}
+    for name, members in data.items():
+        if not isinstance(name, str) or not isinstance(members, list):
+            continue
+        clean = [m.strip() for m in members if isinstance(m, str) and m.strip()]
+        if clean:
+            groups[name.strip()] = clean
+    return groups
+
+
+def _suffix_match(member: str, titles: list[str]) -> str | None:
+    """路径型域名容错：monorepo 的域名是 a/src/pages/b 这类长路径，
+    LLM 即使被要求逐字复制也常简写成尾段——唯一后缀才映射，歧义不赌。"""
+    hits = [t for t in titles if t.endswith("/" + member)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def validate_groups(
+    groups: dict[str, list[str]], valid_titles: list[str]
+) -> tuple[dict[str, list[str]], str]:
+    """归组校验（防幻觉核心）：成员必须真实存在、不重复；遗漏的进「其他」。
+
+    返回 (清洗后的分组, 失败原因)。失败原因非空时调用方降级为平铺。
+    """
+    if not groups:
+        return {}, "未解析出分组"
+    allowed = set(valid_titles)
+    seen: set[str] = set()
+    cleaned: dict[str, list[str]] = {}
+    dropped = 0
+    for name, members in groups.items():
+        if any(word in name.lower() for word in GROUP_TECH_WORDS):
+            return {}, f"组名含技术词：{name}"
+        kept = []
+        for member in members:
+            resolved = member if member in allowed else _suffix_match(member, valid_titles)
+            if resolved is None or resolved in seen:
+                dropped += 1
+                continue
+            seen.add(resolved)
+            kept.append(resolved)
+        if kept:
+            cleaned[name] = kept
+
+    missing = [title for title in valid_titles if title not in seen]
+    if missing:
+        cleaned.setdefault(OTHER_GROUP, []).extend(missing)
+    if not cleaned:
+        return {}, "所有成员都不在功能域清单内"
+    if len(cleaned) < 2:
+        return {}, "只归出一个组，归组无意义"
+    # 幻觉先判：它的诊断信息比"归类太少"更能定位问题
+    if dropped and dropped > len(valid_titles) // 2:
+        return {}, f"过半成员（{dropped}）不在清单内，疑似幻觉"
+    # 绝大多数都落进「其他」时，这棵树等于平铺加一个杂物筐——不如老老实实平铺。
+    # 阈值取 1/3：真实项目总有一批零散功能，但主干必须成形
+    grouped = sum(len(v) for name, v in cleaned.items() if name != OTHER_GROUP)
+    if grouped * 3 < len(valid_titles):
+        return {}, f"仅 {grouped}/{len(valid_titles)} 个功能域被归类，归组无意义"
+    return cleaned, ""
+
+
+async def group_feature_domains(
+    domains: list[ModuleNode], titles: dict[str, str], llm,
+    cache: dict[str, dict[str, list[str]]] | None = None,
+) -> tuple[dict[str, list[str]], str]:
+    """返回 (分组, 来源)。来源 llm / cache / none（none = 保持平铺）。"""
+    if len(domains) <= GROUP_THRESHOLD:
+        return {}, "none"
+
+    signature = domains_signature(domains)
+    if cache and signature in cache:
+        return cache[signature], "cache"
+
+    valid_titles = [titles[m.key] for m in domains]
+    # 推理型模型对大清单归类波动大（偶发空输出/归类过粗）——失败再试一次，
+    # 与业务流程图同款设计；两次都不行才降级平铺
+    for attempt in range(2):
+        try:
+            raw = await llm.group_domains(
+                build_group_input(domains, titles), len(domains),
+                min_groups=MIN_GROUPS, max_groups=MAX_GROUPS,
+            )
+        except Exception as e:  # noqa: BLE001 — 归组失败只降级为平铺
+            logger.warning("功能域归组异常（%s: %s）", type(e).__name__, e)
+            raw = None
+        groups, reason = validate_groups(parse_groups(raw or ""), valid_titles)
+        if not reason:
+            return groups, "llm"
+        logger.warning(
+            "功能域归组失败（%s），%s", reason,
+            "重试一次" if attempt == 0 else "保持平铺三层",
+        )
+    return {}, "none"
+
+
+def build_grouped_feature_map(
+    tree: ProjectTree,
+    points_by_key: dict[str, list[str]],
+    groups: dict[str, list[str]],
+) -> str:
+    """四层 markdown：# 产品 → ## 业务组 → ### 功能域 → - 功能点（M6 D5）。"""
+    domains = feature_domains(tree)
+    titles = domain_titles(domains)
+    by_title = {titles[m.key]: m for m in domains}
+
+    lines = [f"# {tree.name or '项目'}：{project_tagline(tree)}", ""]
+    for group_name, members in groups.items():
+        lines.append(f"## {group_name}")
+        for title in members:
+            module = by_title.get(title)
+            if module is None:
+                continue
+            lines.append(f"### {title}")
+            points = points_by_key.get(module.key) or []
+            lines.extend(f"- {p}" for p in points) if points else lines.append(
+                "- （暂未提取到功能点）"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"

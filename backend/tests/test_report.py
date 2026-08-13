@@ -126,7 +126,7 @@ class FakeLLM:
     def __init__(
         self, chapter_returns=None, overview_returns="## 一、系统概述\n\n概述正文",
         seq_returns=None, feature_returns="- 创建订单\n- 查询订单列表\n- 取消订单",
-        flow_returns=None,
+        flow_returns=None, group_returns=None,
     ):
         self.chapter_returns = chapter_returns
         self.overview_returns = overview_returns
@@ -138,6 +138,18 @@ class FakeLLM:
         self.seq_calls: list[dict] = []
         self.feature_calls: list[dict] = []
         self.flow_calls: list[dict] = []
+        self.group_returns = group_returns
+        self.group_calls: list[dict] = []
+
+    async def group_domains(self, domain_lines, count, min_groups=3, max_groups=10):
+        self.group_calls.append({"domain_lines": domain_lines, "count": count})
+        value = self.group_returns
+        if isinstance(value, list):  # 序列：按调用次数依次返回，用于测重试
+            idx = min(len(self.group_calls), len(value)) - 1
+            value = value[idx]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
     async def generate_business_flows(
         self, flow_lines, module_flows, max_flows=4, max_nodes=8, retry_reason=""

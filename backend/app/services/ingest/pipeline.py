@@ -655,6 +655,7 @@ async def run_index_job(
                 name=m.name, key=module_key(m), kind=m.kind, route_prefix=m.route_prefix,
                 summary=module_summaries.get(module_key(m), ""),
                 agg_hash=module_hashes.get(module_key(m), ""),
+                route_paths=[f"{path}|{entry}" for path, entry in m.route_paths],
             )
             for m in module_map.modules
         ]
