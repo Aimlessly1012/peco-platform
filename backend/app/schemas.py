@@ -20,6 +20,22 @@ class UserOut(BaseModel):
     role: str
 
 
+class UserAdminOut(BaseModel):
+    """用户画像（M11，仅 admin 可见）。invite_code 为空 = 管理员初始账号。"""
+
+    id: uuid.UUID
+    username: str
+    role: str
+    disabled: bool
+    # 同时给出时间戳：前端「禁用于 X」的提示要用它，只有布尔就显示不了
+    disabled_at: datetime | None = None
+    created_at: datetime
+    last_login_at: datetime | None = None
+    invite_code: str | None = None
+    session_count: int = 0
+    message_count: int = 0
+
+
 class InviteCodeOut(BaseModel):
     code: str
     used: bool

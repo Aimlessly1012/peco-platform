@@ -52,7 +52,18 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     role: Mapped[str] = mapped_column(String(10), default=UserRole.MEMBER)
+    # M11：禁用而非删除——账号与数据都留着，随时可恢复。非空即已禁用
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    @property
+    def is_active(self) -> bool:
+        return self.disabled_at is None
 
 
 class InviteCode(Base):

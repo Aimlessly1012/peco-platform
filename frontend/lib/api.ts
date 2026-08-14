@@ -214,6 +214,23 @@ export interface InviteCode {
   created_at: string;
 }
 
+/**
+ * GET /auth/users 的元素（admin 专用，M11）。
+ * 空值语义：从未登录 → last_login_at 为 null；管理员初始账号没有邀请码 → invite_code 为 null。
+ */
+export interface AdminUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  created_at: string;
+  last_login_at: string | null;
+  /** 非 null 即已禁用（禁用而非删除，可恢复）。 */
+  disabled_at: string | null;
+  invite_code: string | null;
+  session_count: number;
+  message_count: number;
+}
+
 export const authApi = {
   me: () => api<AuthUser>("/auth/me"),
   login: (username: string, password: string) =>
@@ -229,6 +246,12 @@ export const authApi = {
   logout: () => api<void>("/auth/logout", { method: "POST" }),
   listInvites: () => api<InviteCode[]>("/auth/invites"),
   createInvite: () => api<InviteCode>("/auth/invites", { method: "POST" }),
+  listUsers: () => api<AdminUser[]>("/auth/users"),
+  // 不消费返回体：护栏失败时后端回 400，成功后统一重拉列表，省得依赖响应形状
+  disableUser: (id: string) =>
+    api<unknown>(`/auth/users/${id}/disable`, { method: "POST" }),
+  enableUser: (id: string) =>
+    api<unknown>(`/auth/users/${id}/enable`, { method: "POST" }),
 };
 
 export interface AskCallbacks {

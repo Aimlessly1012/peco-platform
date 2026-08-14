@@ -4,6 +4,7 @@
 中间件会连它一起拦，而 MCP 有自己独立的 Bearer token 机制（M7 刚修过
 root_path 绕过问题），账号守卫不该伸进去。
 """
+import logging
 import uuid
 
 from fastapi import Depends, HTTPException, Request
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.models.tables import User, UserRole
 from app.services.auth.security import COOKIE_NAME, decode_token
+
+logger = logging.getLogger(__name__)
 
 UNAUTHENTICATED = "请先登录"
 FORBIDDEN = "需要管理员权限"
@@ -28,8 +31,16 @@ async def current_user(
         user_id = uuid.UUID(str(payload.get("sub")))
     except (ValueError, TypeError):
         return None
-    # 每次查库：账号被删或改角色后，旧 token 立即失效（token 里的 role 不可信）
-    return await session.get(User, user_id)
+    # 每次查库：账号被删/改角色/被禁用后，旧 token 立即失效（token 里的信息不可信）
+    user = await session.get(User, user_id)
+    if user is None:
+        return None
+    if user.disabled_at is not None:
+        # M11：JWT 是无状态的，不查库的话被禁用户能拿旧 token 用满 7 天。
+        # 这次查询本来就有（上面那行），禁用判断是白捡的
+        logger.info("已禁用账号尝试访问：%s", user.username)
+        return None
+    return user
 
 
 async def require_user(user: User | None = Depends(current_user)) -> User:

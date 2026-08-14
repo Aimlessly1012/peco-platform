@@ -9,7 +9,7 @@ import { useAuth } from "./AuthProvider";
  *
  * 设计稿把 `rag-coder://projects` 写死在 layout 里，但 layout 是 server component
  * （要 export metadata），拿不到当前路由。这里单独抽成 client 组件：路径跟随真实
- * pathname，同时挂上 M3 的 /mcp-guide 与 M8 的 /invites（仅 admin）入口。
+ * pathname，同时挂上 M3 的 /mcp-guide 与仅 admin 可见的 /invites、/users 入口。
  */
 
 interface NavItem {
@@ -26,6 +26,12 @@ const NAV: NavItem[] = [
     href: "/invites",
     label: "邀请码",
     active: (p) => p.startsWith("/invites"),
+    adminOnly: true,
+  },
+  {
+    href: "/users",
+    label: "用户",
+    active: (p) => p.startsWith("/users"),
     adminOnly: true,
   },
 ];
