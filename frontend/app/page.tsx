@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import StageBar from "@/components/StageBar";
 import { api, IndexDepth, IndexJob, mcpEndpoint, Project } from "@/lib/api";
 import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/labels";
+import { useIndexProgress } from "@/lib/useIndexProgress";
 
 const COLS = "grid-cols-[14px_1fr_150px_150px_176px]";
 
@@ -19,35 +20,31 @@ export default function ProjectListPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [error, setError] = useState("");
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const list = await api<Project[]>("/projects");
       setProjects(list);
-      const active = list.filter((p) => p.status === "indexing" || p.status === "failed");
-      const jobEntries = await Promise.all(
-        active.map(async (p) => {
+      // 失败项目的报错文本要额外取一次；进行中的项目交给各自的 SSE 订阅
+      const failed = list.filter((p) => p.status === "failed");
+      const entries = await Promise.all(
+        failed.map(async (p) => {
           try {
-            const job = await api<IndexJob>(`/projects/${p.id}/jobs/latest`);
-            return [p.id, job] as const;
+            return [p.id, await api<IndexJob>(`/projects/${p.id}/jobs/latest`)] as const;
           } catch {
             return null;
           }
         })
       );
-      setJobs(Object.fromEntries(jobEntries.filter(Boolean) as [string, IndexJob][]));
+      setJobs(Object.fromEntries(entries.filter(Boolean) as [string, IndexJob][]));
     } catch (e) {
       setError((e as Error).message);
     }
   }, []);
 
+  // 只在进入页面时拉一次：进度走 SSE，索引结束由行组件回调触发再拉
   useEffect(() => {
     refresh();
-    timer.current = setInterval(refresh, 2000);
-    return () => {
-      if (timer.current) clearInterval(timer.current);
-    };
   }, [refresh]);
 
   /** 重新索引保持项目原有深度：fast 项目不会因为点一下 ⟳ 就产生 LLM 成本。 */
@@ -158,121 +155,17 @@ export default function ProjectListPage() {
               <span className="text-right">ACTIONS</span>
             </div>
 
-            {shown.map((p) => {
-              const s = PROJECT_STATUS_BADGE[p.status];
-              const job = jobs[p.id];
-              const isIndexing = p.status === "indexing" && !!job;
-              const isFailed = p.status === "failed";
-              return (
-                <div
-                  key={p.id}
-                  className={`min-w-[860px] border-b border-hair px-4 py-4 last:border-b-0 ${
-                    isIndexing ? "bg-accent/[.04]" : isFailed ? "bg-danger/[.03]" : ""
-                  }`}
-                >
-                  <div className={`grid ${COLS} items-center gap-4`}>
-                    <span
-                      className={`text-xs ${
-                        isFailed
-                          ? "text-danger"
-                          : p.status === "pending"
-                            ? "text-faint"
-                            : "text-accent"
-                      }`}
-                    >
-                      {s.glyph}
-                    </span>
-                    <div className="min-w-0">
-                      <Link
-                        href={`/projects/${p.id}`}
-                        className="text-[15px] font-medium hover:text-accent"
-                      >
-                        {p.name}
-                      </Link>
-                      <div className="mt-[3px] truncate text-[11px] text-muted">
-                        {p.git_url}
-                        {p.default_branch ? ` · ${p.default_branch}` : ""}
-                        {p.index_depth === "fast" && (
-                          <span className="ml-1.5 text-accent" title="快速模式索引，未生成深度理解">
-                            · FAST
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted">
-                      {p.last_indexed_commit ? p.last_indexed_commit.slice(0, 8) : "—"}
-                    </span>
-                    <span
-                      className={`justify-self-start border px-2 py-[3px] text-[11px] tracking-wide ${s.cls}`}
-                    >
-                      {p.status === "indexing" && job ? `INDEXING ${job.progress}%` : s.label}
-                    </span>
-                    <div className="flex justify-end gap-2 text-[11px]">
-                      <Link
-                        href={`/projects/${p.id}`}
-                        className="border border-line px-[10px] py-[5px] text-muted hover:border-ink hover:text-ink"
-                      >
-                        详情
-                      </Link>
-                      {p.status === "ready" ? (
-                        <Link
-                          href={`/projects/${p.id}/chat`}
-                          className="bg-ink px-[10px] py-[5px] font-medium text-paper"
-                        >
-                          聊天
-                        </Link>
-                      ) : (
-                        <span className="border border-hair px-[10px] py-[5px] text-faint">
-                          聊天
-                        </span>
-                      )}
-                      <button
-                        onClick={() => triggerIndex(p)}
-                        disabled={p.status === "indexing"}
-                        title={
-                          p.status === "pending"
-                            ? "开始索引"
-                            : p.index_depth === "fast"
-                              ? "重新索引（保持快速模式）"
-                              : "重新索引"
-                        }
-                        className="border border-line px-[10px] py-[5px] text-muted hover:text-ink disabled:opacity-40"
-                      >
-                        {p.status === "pending" ? "开始索引" : "⟳"}
-                      </button>
-                      {isAdmin && (
-                        <button
-                          onClick={() => remove(p)}
-                          title="删除项目"
-                          className="px-1 text-danger hover:underline"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {isIndexing && (
-                    <div className="mt-3.5 flex items-center gap-3.5">
-                      <StageBar stage={job.stage} progress={job.progress} />
-                      <span className="whitespace-nowrap text-[11px] text-muted">
-                        {statNumber(job.stats_json, "embedded", "embedded_new")}/
-                        {statNumber(job.stats_json, "chunks")} chunk
-                        {statNumber(job.stats_json, "embedded_cached")
-                          ? ` · cached ${statNumber(job.stats_json, "embedded_cached")}`
-                          : ""}
-                      </span>
-                    </div>
-                  )}
-
-                  {isFailed && job?.error_text && (
-                    <div className="mt-3 border-l-2 border-danger bg-danger/[.05] px-3 py-2 text-[11px] leading-relaxed text-danger">
-                      stage={job.stage} · {job.error_text}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {shown.map((p) => (
+              <ProjectRow
+                key={p.id}
+                project={p}
+                failedJob={jobs[p.id]}
+                isAdmin={isAdmin}
+                onTrigger={triggerIndex}
+                onRemove={remove}
+                onFinished={refresh}
+              />
+            ))}
           </div>
         )}
 
@@ -293,6 +186,137 @@ export default function ProjectListPage() {
     </div>
   );
 }
+
+/**
+ * 单个项目行。抽成组件是为了让每行各自持有一个进度订阅——
+ * hook 不能在 map 里调用，而进度必须按项目独立。
+ */
+function ProjectRow({
+  project: p,
+  failedJob,
+  isAdmin,
+  onTrigger,
+  onRemove,
+  onFinished,
+}: {
+  project: Project;
+  /** 失败项目的最近一次任务，用来显示报错；进行中的项目不走它。 */
+  failedJob?: IndexJob;
+  isAdmin: boolean;
+  onTrigger: (p: Project) => void;
+  onRemove: (p: Project) => void;
+  onFinished: () => void;
+}) {
+  const isIndexing = p.status === "indexing";
+  const isFailed = p.status === "failed";
+  const { progress } = useIndexProgress(p.id, isIndexing, onFinished);
+  const s = PROJECT_STATUS_BADGE[p.status];
+  const pct = progress?.progress ?? 0;
+
+  return (
+    <div
+      className={`min-w-[860px] border-b border-hair px-4 py-4 last:border-b-0 ${
+        isIndexing ? "bg-accent/[.04]" : isFailed ? "bg-danger/[.03]" : ""
+      }`}
+    >
+      <div className={`grid ${COLS} items-center gap-4`}>
+        <span
+          className={`text-xs ${
+            isFailed ? "text-danger" : p.status === "pending" ? "text-faint" : "text-accent"
+          }`}
+        >
+          {s.glyph}
+        </span>
+        <div className="min-w-0">
+          <Link
+            href={`/projects/${p.id}`}
+            className="text-[15px] font-medium hover:text-accent"
+          >
+            {p.name}
+          </Link>
+          <div className="mt-[3px] truncate text-[11px] text-muted">
+            {p.git_url}
+            {p.default_branch ? ` · ${p.default_branch}` : ""}
+            {p.index_depth === "fast" && (
+              <span className="ml-1.5 text-accent" title="快速模式索引，未生成深度理解">
+                · FAST
+              </span>
+            )}
+          </div>
+        </div>
+        <span className="text-xs text-muted">
+          {p.last_indexed_commit ? p.last_indexed_commit.slice(0, 8) : "—"}
+        </span>
+        <span
+          className={`justify-self-start border px-2 py-[3px] text-[11px] tracking-wide ${s.cls}`}
+        >
+          {isIndexing && progress ? `INDEXING ${pct}%` : s.label}
+        </span>
+        <div className="flex justify-end gap-2 text-[11px]">
+          <Link
+            href={`/projects/${p.id}`}
+            className="border border-line px-[10px] py-[5px] text-muted hover:border-ink hover:text-ink"
+          >
+            详情
+          </Link>
+          {p.status === "ready" ? (
+            <Link
+              href={`/projects/${p.id}/chat`}
+              className="bg-ink px-[10px] py-[5px] font-medium text-paper"
+            >
+              聊天
+            </Link>
+          ) : (
+            <span className="border border-hair px-[10px] py-[5px] text-faint">聊天</span>
+          )}
+          <button
+            onClick={() => onTrigger(p)}
+            disabled={isIndexing}
+            title={
+              p.status === "pending"
+                ? "开始索引"
+                : p.index_depth === "fast"
+                  ? "重新索引（保持快速模式）"
+                  : "重新索引"
+            }
+            className="border border-line px-[10px] py-[5px] text-muted hover:text-ink disabled:opacity-40"
+          >
+            {p.status === "pending" ? "开始索引" : "⟳"}
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => onRemove(p)}
+              title="删除项目"
+              className="px-1 text-danger hover:underline"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isIndexing && progress && (
+        <div className="mt-3.5 flex items-center gap-3.5">
+          <StageBar stage={progress.stage} progress={pct} />
+          <span className="whitespace-nowrap text-[11px] text-muted">
+            {statNumber(progress.stats, "embedded", "embedded_new")}/
+            {statNumber(progress.stats, "chunks")} chunk
+            {statNumber(progress.stats, "embedded_cached")
+              ? ` · cached ${statNumber(progress.stats, "embedded_cached")}`
+              : ""}
+          </span>
+        </div>
+      )}
+
+      {isFailed && failedJob?.error_text && (
+        <div className="mt-3 border-l-2 border-danger bg-danger/[.05] px-3 py-2 text-[11px] leading-relaxed text-danger">
+          stage={failedJob.stage} · {failedJob.error_text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 const DEPTHS: { key: IndexDepth; title: string; hint: string }[] = [
   {

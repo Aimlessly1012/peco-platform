@@ -4,7 +4,7 @@
 """
 import pytest
 
-from app.services.qa.workflow import CLASSIFY_PROMPT, SYSTEM_PROMPT, classify_node, retrieve_node
+from app.services.qa.workflow import SYSTEM_PROMPT, UNDERSTAND_PROMPT, retrieve_node
 from app.services.retrieval.service import RetrievedItem, format_impact_context
 
 
@@ -63,54 +63,10 @@ def test_format_impact_context_marks_truncation():
 
 
 def test_prompts_cover_impact():
-    assert "impact" in CLASSIFY_PROMPT
-    assert "会影响哪些地方" in CLASSIFY_PROMPT
+    assert "impact" in UNDERSTAND_PROMPT
+    assert "会影响哪些地方" in UNDERSTAND_PROMPT
     assert "【影响面分析】" in SYSTEM_PROMPT
     assert "分层回答" in SYSTEM_PROMPT
-
-
-# ---------------- classify 三分类 ----------------
-
-
-class FakeLLM:
-    def __init__(self, reply):
-        self.reply = reply
-
-    async def ainvoke(self, messages, config=None):
-        if isinstance(self.reply, Exception):
-            raise self.reply
-
-        class Resp:
-            content = self.reply
-
-        return Resp()
-
-
-@pytest.mark.parametrize(
-    "reply,expect",
-    [
-        ("impact", "impact"),
-        ("IMPACT", "impact"),
-        ("global", "global"),
-        ("local", "local"),
-        ("这是一个 impact 类问题", "impact"),
-        ("无法判断", "local"),          # 兜底 local
-    ],
-)
-async def test_classify_three_way(monkeypatch, reply, expect):
-    monkeypatch.setattr(
-        "app.services.qa.workflow.build_llm", lambda streaming=True: FakeLLM(reply)
-    )
-    assert (await classify_node({"question": "q"}))["question_type"] == expect
-
-
-async def test_classify_failure_falls_back_to_local(monkeypatch):
-    """spec 场景: 分类调用异常时按 local 检索，流程不中断。"""
-    monkeypatch.setattr(
-        "app.services.qa.workflow.build_llm",
-        lambda streaming=True: FakeLLM(RuntimeError("上游 500")),
-    )
-    assert (await classify_node({"question": "q"}))["question_type"] == "local"
 
 
 # ---------------- impact 检索策略 ----------------

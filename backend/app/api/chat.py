@@ -22,6 +22,15 @@ from app.services.auth.deps import require_user
 from app.services.qa.workflow import qa_graph
 
 logger = logging.getLogger(__name__)
+
+# M9 B3：LangGraph 节点名 → 前端可消费的阶段标识。
+# 只映射这几个已知节点，其余（图内部的 __start__ / RunnableSequence 等）忽略；
+# 前端对未知 stage 也应忽略，双向向前兼容
+STAGE_NODES = {
+    "understand": "understand",   # M9 合并前是 rewrite + classify 两个节点
+    "retrieve": "retrieve",
+    "generate": "generate",
+}
 # M8：聊天全组要求登录态；会话按人隔离见 _owned_session
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_user)])
 
@@ -132,6 +141,7 @@ async def ask(
     async def event_stream():
         answer_parts: list[str] = []
         citations: list[dict] = []
+        sent_stages: set[str] = set()
         try:
             async for event in qa_graph.astream_events(
                 {
@@ -142,6 +152,12 @@ async def ask(
                 version="v2",
             ):
                 kind = event["event"]
+                if kind == "on_chain_start":
+                    stage = STAGE_NODES.get(event.get("name") or "")
+                    if stage and stage not in sent_stages:
+                        sent_stages.add(stage)   # 每阶段只报一次
+                        yield {"event": "stage", "data": json.dumps({"stage": stage})}
+                    continue
                 if kind == "on_chat_model_stream":
                     # 只转发 generate 节点（tags=answer）的流，rewrite/classify 不进答案
                     if "answer" not in (event.get("tags") or []):

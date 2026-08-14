@@ -17,6 +17,7 @@ import {
   UnderstandingReport,
 } from "@/lib/api";
 import { buildModuleMindmap, MODULE_MINDMAP_FILE_LIMIT } from "@/lib/mermaid";
+import { useIndexProgress } from "@/lib/useIndexProgress";
 import {
   formatDateTime,
   formatDuration,
@@ -70,7 +71,6 @@ export default function ProjectDetailPage({
 }) {
   const { id: projectId } = use(params);
   const [project, setProject] = useState<Project | null>(null);
-  const [job, setJob] = useState<IndexJob | null>(null);
   const [tab, setTab] = useState<TabKey>("understanding");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -94,46 +94,41 @@ export default function ProjectDetailPage({
     if (isMockMode()) setMock(true);
   }, []);
 
-  useEffect(() => {
-    let stopped = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    let wasIndexing = false;
-
-    const tick = async () => {
-      try {
-        const p = await api<Project>(`/projects/${projectId}`);
-        if (stopped) return;
-        setProject(p);
-        setError("");
-        // 索引刚结束：报告与模块数据已更新，让对应页签重新取一次
-        const indexing = p.status === "indexing";
-        if (wasIndexing && !indexing) setReloadKey((k) => k + 1);
-        wasIndexing = indexing;
-        try {
-          const latest = await api<IndexJob>(`/projects/${projectId}/jobs/latest`);
-          if (!stopped) setJob(latest);
-        } catch {
-          if (!stopped) setJob(null);
-        }
-      } catch (e) {
-        if (stopped) return;
-        // 项目已被删除或 id 不存在：停止轮询，避免每 2 秒重复报错
-        if (isNotFound(e)) {
-          setMissing(true);
-          if (timer) clearInterval(timer);
-        } else {
-          setError((e as Error).message);
-        }
-      }
-    };
-
-    tick();
-    timer = setInterval(tick, 2000);
-    return () => {
-      stopped = true;
-      if (timer) clearInterval(timer);
-    };
+  /** 项目基本信息按需拉取——进度改由 SSE 推送，这里不再轮询。 */
+  const loadProject = useCallback(async () => {
+    try {
+      const p = await api<Project>(`/projects/${projectId}`);
+      setProject(p);
+      setError("");
+      return p;
+    } catch (e) {
+      // 项目已被删除或 id 不存在
+      if (isNotFound(e)) setMissing(true);
+      else setError((e as Error).message);
+      return null;
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    loadProject();
+  }, [loadProject]);
+
+  /** 刚触发过索引：此时 project.status 还没翻成 indexing，先自行盯着流。 */
+  const [watching, setWatching] = useState(false);
+  const indexing = project?.status === "indexing" || watching;
+
+  const onIndexFinished = useCallback(() => {
+    setWatching(false);
+    loadProject();
+    // 索引结束：报告与模块数据已更新，让对应页签重新取一次
+    setReloadKey((k) => k + 1);
+  }, [loadProject]);
+
+  const { progress, degraded } = useIndexProgress(
+    projectId,
+    indexing,
+    onIndexFinished
+  );
 
   useEffect(() => {
     let stopped = false;
@@ -192,11 +187,13 @@ export default function ProjectDetailPage({
       try {
         await api(`/projects/${projectId}/index${query}`, { method: "POST" });
         setNotice(message);
+        setWatching(true);
+        loadProject();
       } catch (e) {
         setError((e as Error).message);
       }
     },
-    [projectId]
+    [projectId, loadProject]
   );
 
   const isFast = project?.index_depth === "fast";
@@ -240,7 +237,6 @@ export default function ProjectDetailPage({
   }
 
   const badge = project ? PROJECT_STATUS_BADGE[project.status] : null;
-  const indexing = project?.status === "indexing";
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -379,11 +375,12 @@ export default function ProjectDetailPage({
           </button>
         </div>
 
-        {indexing && job && (
+        {indexing && progress && (
           <div className="mt-4 flex items-center gap-3.5">
-            <StageBar stage={job.stage} progress={job.progress} />
+            <StageBar stage={progress.stage} progress={progress.progress} />
             <span className="whitespace-nowrap text-[11px] text-muted">
-              {stageLabel(job.stage)}
+              {stageLabel(progress.stage)}
+              {degraded && <span className="ml-1 text-faint">（轮询）</span>}
             </span>
           </div>
         )}
@@ -436,7 +433,13 @@ export default function ProjectDetailPage({
               dataflowMermaid={report?.dataflow_mermaid ?? ""}
             />
           )}
-          {tab === "jobs" && <JobsTab projectId={projectId} mock={mock} />}
+          {tab === "jobs" && (
+            <JobsTab
+              projectId={projectId}
+              mock={mock}
+              refreshKey={`${reloadKey}:${progress?.stage ?? ""}:${progress?.status ?? ""}`}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -935,7 +938,16 @@ function ModuleCard({ module: m }: { module: ModuleInfo }) {
 }
 
 /** 页签三：索引记录（倒序任务表格，stats 可展开，失败显示错误）。 */
-function JobsTab({ projectId, mock }: { projectId: string; mock: boolean }) {
+function JobsTab({
+  projectId,
+  mock,
+  refreshKey,
+}: {
+  projectId: string;
+  mock: boolean;
+  /** 变化即重拉：索引期间由 SSE 的阶段/状态推动，不再定时轮询。 */
+  refreshKey: string;
+}) {
   const [jobs, setJobs] = useState<IndexJob[] | null>(null);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -960,12 +972,10 @@ function JobsTab({ projectId, mock }: { projectId: string; mock: boolean }) {
       }
     };
     load();
-    const timer = setInterval(load, 4000);
     return () => {
       stopped = true;
-      clearInterval(timer);
     };
-  }, [projectId, mock]);
+  }, [projectId, mock, refreshKey]);
 
   if (error) return <ErrorCard message={error} />;
   if (!jobs) return <Loading text="LOADING JOBS…" />;

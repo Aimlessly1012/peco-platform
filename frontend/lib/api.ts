@@ -241,6 +241,11 @@ export interface AskCallbacks {
    * 首 token 之前唯一能证明「连接还活着」的信号，用来把等待文案说得更笃定。
    */
   onPing?: () => void;
+  /**
+   * 首 token 之前的处理阶段（M9）：rewrite / classify / rewrite_classify / retrieve / generate。
+   * 后端灰度期间可能完全不发，等待文案要能退回纯计时。
+   */
+  onStage?: (stage: string) => void;
 }
 
 /** 解析后端 SSE（event: xxx / data: yyy 块）。 */
@@ -277,8 +282,10 @@ export async function askStream(
       else if (line.startsWith("data:")) data += line.slice(5).trim();
     }
     if (comment) cb.onPing?.();
+    // 未知 event 一律静默忽略——后端加新事件类型时不能把这一块当错误吞掉
     if (event === "token") cb.onToken(JSON.parse(data).t);
     else if (event === "citations") cb.onCitations(JSON.parse(data));
+    else if (event === "stage") cb.onStage?.(JSON.parse(data).stage);
     else if (event === "done") cb.onDone();
     else if (event === "error") cb.onError(JSON.parse(data).message);
   };

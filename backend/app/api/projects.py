@@ -2,7 +2,10 @@
 import shutil
 import uuid
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +26,11 @@ from app.services.ingest.pipeline import (
     VALID_DEPTHS,
     VALID_MODES,
     start_index_job,
+)
+from app.services.ingest.progress_broker import (
+    is_terminal,
+    job_event,
+    progress_broker,
 )
 from app.services.auth.deps import require_admin, require_user
 from app.services.report.graph_reader import read_project_tree
@@ -108,6 +116,39 @@ async def trigger_index(
     if job is None:
         raise HTTPException(409, "该项目已有索引任务在运行")
     return job
+
+
+@router.get("/{project_id}/progress")
+async def progress_stream(
+    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+):
+    """索引进度 SSE（M9 B2）：首连推快照 → 增量 → 终态关流。
+
+    没有运行中的任务就直接关流（不吊着连接）——前端触发索引后再连。
+    """
+    await _get_project_or_404(project_id, session)
+    latest = await session.scalar(
+        select(IndexJob)
+        .where(IndexJob.project_id == project_id)
+        .order_by(desc(IndexJob.started_at))
+        .limit(1)
+    )
+    snapshot = job_event(latest) if latest is not None else {"status": "idle"}
+
+    async def event_stream():
+        # 先订阅再推快照：反过来的话，两步之间产生的事件会丢
+        with progress_broker.subscribe(str(project_id)) as queue:
+            yield {"event": "progress", "data": json.dumps(snapshot)}
+            if latest is None or is_terminal(snapshot):
+                return                      # 无任务 / 已终态：推完就走
+            while True:
+                event = await queue.get()
+                yield {"event": "progress", "data": json.dumps(event)}
+                if is_terminal(event):
+                    return
+
+    # sep="\n" 与 15s ping 沿用 M6 事故修复后的既有配置，别改
+    return EventSourceResponse(event_stream(), sep="\n", ping=15)
 
 
 @router.get("/{project_id}/jobs", response_model=list[IndexJobOut])

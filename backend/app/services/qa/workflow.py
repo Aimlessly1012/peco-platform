@@ -1,11 +1,13 @@
-"""LangGraph 问答工作流（M2）：rewrite → classify → retrieve → generate。
+"""LangGraph 问答工作流（M9 起三节点）：understand → retrieve → generate。
 
-- rewrite：有历史时把追问改写为独立问题（无历史跳过）
-- classify：global|local，失败默认 local（spec: 分类失败安全回退）
+- understand：一次调用同时完成"改写追问"与"分类 global|local|impact"（M9 D3），
+  解析失败退回原问题 + local（与合并前各自的降级语义一致）
 - generate 的 LLM 调用带 tags=["answer"]，SSE 层只转发该标签的 token 流，
-  避免 rewrite/classify 的输出混入答案。
+  避免 understand 的输出混入答案。
 """
+import json
 import logging
+import re
 from typing import TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -43,30 +45,29 @@ SYSTEM_PROMPT = """你是代码仓库问答助手。基于给出的项目资料�
    每层列出具体文件路径；没有引用者时明确说明"未发现其他文件引用它"
 6. 用中文回答，代码保持原文"""
 
-REWRITE_PROMPT = """根据对话历史，把用户的最新问题改写成一个不依赖上下文、可独立理解的完整问题。只输出改写后的问题本身，不要解释。
+UNDERSTAND_PROMPT = """你要为一个代码仓库问答系统做两件事：改写问题、判断问题类型。
+
+严格只输出一个 JSON 对象，不要解释、不要代码围栏：
+{{"rewritten": "改写后的完整问题", "type": "global|local|impact"}}
+
+改写规则：结合对话历史，把最新问题补全成不依赖上下文、可独立理解的问题；
+本来就完整的问题原样返回。无对话历史时直接返回原问题。
+
+类型规则：
+- global：项目整体——架构、技术栈、入口、整体流程、模块划分、"这个项目是干嘛的"
+- local：具体代码——某函数/类/文件在哪、怎么实现、某段逻辑、某接口细节
+- impact：改动波及——改/删/重构某文件或函数会影响什么、谁依赖它、要回归测哪些地方
+
+例子：
+问题"这个项目的整体架构是什么" → {{"rewritten": "这个项目的整体架构是什么", "type": "global"}}
+问题"create_order 函数在哪" → {{"rewritten": "create_order 函数在哪", "type": "local"}}
+问题"改 order_service.py 会影响哪些地方" → {{"rewritten": "改 order_service.py 会影响哪些地方", "type": "impact"}}
+历史提到订单模块、问题"那它的取消逻辑呢" → {{"rewritten": "订单模块的取消逻辑是怎么实现的", "type": "local"}}
 
 对话历史：
 {history}
 
 最新问题：{question}"""
-
-CLASSIFY_PROMPT = """判断以下关于代码项目的问题属于哪一类，只输出一个词（global、local 或 impact）：
-- global：关于项目整体的——架构、技术栈、入口、整体流程、模块划分、"这个项目是干嘛的"
-- local：关于具体代码的——某个函数/类/文件在哪、怎么实现、某段逻辑、某个接口的细节
-- impact：关于改动波及范围的——改/删/重构某个文件或函数会影响什么、谁依赖它、动了它要回归测哪些地方
-
-例子：
-"这个项目的整体架构是什么" → global
-"create_order 函数在哪" → local
-"登录流程怎么实现的" → global
-"这个报错是哪里抛的" → local
-"改 order_service.py 会影响哪些地方" → impact
-"删掉这个工具函数有风险吗" → impact
-"谁在依赖 auth 中间件" → impact
-"重构 UserCard 组件要动哪些文件" → impact
-
-问题：{question}"""
-
 
 class QAState(TypedDict, total=False):
     project_id: str
@@ -89,47 +90,61 @@ def build_llm(streaming: bool = True) -> ChatOpenAI:
     )
 
 
-async def rewrite_node(state: QAState) -> QAState:
-    if not state.get("history"):
-        return {"rewritten_question": state["question"]}
+def parse_understanding(raw: str, question: str) -> tuple[str, str]:
+    """解析合并调用的 JSON 输出 → (改写后问题, 类型)。
+
+    任何解析问题都退回 (原问题, local)——与合并前 rewrite/classify 各自的降级语义一致。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return question, "local"
+    match = re.search(r"\{.*\}", text, re.S)
+    if match is None:
+        return question, "local"
+    try:
+        data = json.loads(match.group(0))
+    except (json.JSONDecodeError, ValueError):
+        return question, "local"
+    if not isinstance(data, dict):
+        return question, "local"
+
+    rewritten = data.get("rewritten")
+    rewritten = rewritten.strip() if isinstance(rewritten, str) else ""
+
+    qtype = str(data.get("type", "")).strip().lower()
+    # impact 先判：影响面问题的描述里常常也带 global/local 字样
+    if "impact" in qtype:
+        question_type = "impact"
+    elif "global" in qtype:
+        question_type = "global"
+    else:
+        question_type = "local"
+    return rewritten or question, question_type
+
+
+async def understand_node(state: QAState) -> QAState:
+    """改写 + 分类合并成一次 LLM 调用（M9 D3）。
+
+    合并前是两次串行调用，各 3-10s，首答前白等一轮。两件事输入相同、输出都很短，
+    没有拆开的必要。失败时退回 (原问题, local)——与原先两个节点各自的降级一致。
+    """
+    question = state["question"]
     history_text = "\n".join(
-        f"{m['role']}: {m['content'][:300]}" for m in state["history"][-6:]
-    )
+        f"{m['role']}: {m['content'][:300]}" for m in state.get("history", [])[-6:]
+    ) or "（无）"
     try:
         llm = build_llm(streaming=False)
         resp = await llm.ainvoke(
-            [HumanMessage(content=REWRITE_PROMPT.format(
-                history=history_text, question=state["question"]
+            [HumanMessage(content=UNDERSTAND_PROMPT.format(
+                history=history_text, question=question
             ))],
             config={"tags": ["internal"]},
         )
-        rewritten = (resp.content or "").strip()
-        return {"rewritten_question": rewritten or state["question"]}
-    except Exception:  # noqa: BLE001 — 改写失败退回原问题
-        logger.warning("rewrite 失败，使用原问题", exc_info=True)
-        return {"rewritten_question": state["question"]}
-
-
-async def classify_node(state: QAState) -> QAState:
-    question = state.get("rewritten_question") or state["question"]
-    try:
-        llm = build_llm(streaming=False)
-        resp = await llm.ainvoke(
-            [HumanMessage(content=CLASSIFY_PROMPT.format(question=question))],
-            config={"tags": ["internal"]},
-        )
-        answer = (resp.content or "").strip().lower()
-        # impact 先判：影响面问题往往也含 global/local 字样
-        if "impact" in answer:
-            qtype = "impact"
-        elif "global" in answer:
-            qtype = "global"
-        else:
-            qtype = "local"
-    except Exception:  # noqa: BLE001 — spec: 分类失败安全回退 local
-        logger.warning("classify 失败，回退 local", exc_info=True)
-        qtype = "local"
-    return {"question_type": qtype}
+        rewritten, question_type = parse_understanding(resp.content or "", question)
+    except Exception:  # noqa: BLE001 — 理解失败不该让问答中断
+        logger.warning("问题理解调用失败，退回原问题 + local", exc_info=True)
+        rewritten, question_type = question, "local"
+    return {"rewritten_question": rewritten, "question_type": question_type}
 
 
 def _format_item(i: int, item: RetrievedItem) -> str:
@@ -211,13 +226,11 @@ async def generate_node(state: QAState) -> QAState:
 
 def build_qa_graph():
     graph = StateGraph(QAState)
-    graph.add_node("rewrite", rewrite_node)
-    graph.add_node("classify", classify_node)
+    graph.add_node("understand", understand_node)   # M9：原 rewrite + classify
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("generate", generate_node)
-    graph.add_edge(START, "rewrite")
-    graph.add_edge("rewrite", "classify")
-    graph.add_edge("classify", "retrieve")
+    graph.add_edge(START, "understand")
+    graph.add_edge("understand", "retrieve")
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
     return graph.compile()

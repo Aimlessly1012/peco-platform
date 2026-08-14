@@ -29,6 +29,8 @@ interface DisplayMessage {
   startedAt?: number;
   /** 收到过 SSE 心跳 = 连接确实活着。 */
   pinged?: boolean;
+  /** 后端上报的处理阶段（M9），等待文案优先用它。 */
+  stage?: string;
   /** 出错的回答保留在原位，可就地重试。 */
   failed?: string;
 }
@@ -180,6 +182,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       onCitations: (c) => patchLast({ citations: c }),
       // 心跳只在首 token 之前有意义，标一次就够
       onPing: () => patchLast((m) => (m.pinged ? {} : { pinged: true })),
+      onStage: (stage) => patchLast({ stage }),
       onDone: () => {
         patchLast({ streaming: false });
         setBusy(false);
@@ -244,6 +247,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 streaming: true,
                 failed: undefined,
                 pinged: false,
+                stage: undefined,
                 startedAt: Date.now(),
               }
             : m
@@ -370,6 +374,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   <ThinkingIndicator
                     startedAt={m.startedAt ?? Date.now()}
                     pinged={m.pinged}
+                    stage={m.stage}
                   />
                 ) : (
                   <div

@@ -56,6 +56,7 @@ from app.services.ingest.module_mapper import (
     split_large_modules,
 )
 from app.services.ingest.progress import BatchCounter, StageProgress, batch_count
+from app.services.ingest.progress_broker import job_event, progress_broker
 from app.services.ingest.router_parser import ModuleMap, parse_routes
 from app.services.ingest.summarizer import (
     fallback_summary,
@@ -127,6 +128,9 @@ async def _update_job(job_id: uuid.UUID, **values) -> None:
         for k, v in values.items():
             setattr(job, k, v)
         await session.commit()
+        # 进度推送挂在这里而不是各调用点：阶段切换、子进度、stats 全都经过它，
+        # 挂一处就不会有哪条更新忘了推（M9 D1）
+        progress_broker.publish(str(job.project_id), job_event(job))
 
 
 async def _finish(
@@ -153,6 +157,7 @@ async def _finish(
             job.error_text = error
             project.status = ProjectStatus.FAILED
         await session.commit()
+        progress_broker.publish(str(project_id), job_event(job))
 
 
 def _parse_all(
