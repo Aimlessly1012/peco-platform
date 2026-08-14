@@ -161,7 +161,9 @@ class ReportLLM:
 
     @property
     def model(self) -> str:
-        return settings.chat_model
+        # 报告件与 L2/L3/L4 摘要同属离线产出，质量优先：跟 summarizer 用同一个
+        # 模型配置，别被在线问答的提速选型（chat_model）带走
+        return settings.summary_model or settings.chat_model
 
     async def _complete(self, prompt: str, max_tokens: int) -> str | None:
         delay = 2.0

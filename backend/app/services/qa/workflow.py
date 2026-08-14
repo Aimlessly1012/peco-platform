@@ -80,11 +80,21 @@ class QAState(TypedDict, total=False):
     project_summary: str
 
 
-def build_llm(streaming: bool = True) -> ChatOpenAI:
+def build_llm(streaming: bool = True, for_generate: bool = False) -> ChatOpenAI:
+    """for_generate=True 时优先用 GENERATE_MODEL（没配就回落 chat_model）。
+
+    分开的理由：生成环节吃 7-10K 字符上下文，推理型模型首字要十几秒；
+    理解/分类输出极短，用哪个都快。同一供应商同一 key，只换模型名。
+    """
+    model = (
+        (settings.generate_model or settings.chat_model)
+        if for_generate
+        else settings.chat_model
+    )
     return ChatOpenAI(
         base_url=settings.chat_base_url,
         api_key=settings.chat_api_key,
-        model=settings.chat_model,
+        model=model,
         streaming=streaming,
         temperature=0.1,
     )
@@ -179,12 +189,39 @@ async def _impact_context(project_id: str, question: str, items: list[RetrievedI
     return format_impact_context(impact)
 
 
+def fit_context_budget(items: list[RetrievedItem]) -> list[RetrievedItem]:
+    """按字符预算裁掉尾部资料，返回保留下来的条目（M10 A）。
+
+    **必须裁 items 本身而不是只裁拼好的文本**：答案里的 [n] 上标按 items 下标定位，
+    citations 也从同一个列表来——只裁文本会让编号与引用错位（chat.py 有同款告警）。
+    """
+    budget = settings.context_char_budget
+    if budget <= 0:
+        return items
+    kept: list[RetrievedItem] = []
+    used = 0
+    for item in items:
+        size = len(item.content or "")
+        # 前 context_min_items 条无条件保留，之后按预算收
+        if len(kept) >= settings.context_min_items and used + size > budget:
+            break
+        kept.append(item)
+        used += size
+    if len(kept) < len(items):
+        logger.info(
+            "上下文预算裁剪：%d → %d 条（%d 字符，预算 %d）",
+            len(items), len(kept), used, budget,
+        )
+    return kept
+
+
 async def retrieve_node(state: QAState) -> QAState:
     question = state.get("rewritten_question") or state["question"]
     qtype = state.get("question_type", "local")
     # impact 的目标定位与常规回答都需要局部检索结果，故检索策略同 local；
     # 但要把 impact 透传下去——检索层据此跳过 rerank（M7 D2：它按图距离排序）
     items = await search_layered(state["project_id"], question, qtype)
+    items = fit_context_budget(items)   # M10 A：砍尾部长尾，省 prefill
 
     parts = [_format_item(i + 1, item) for i, item in enumerate(items)]
     project_summary = ""
@@ -206,7 +243,7 @@ async def retrieve_node(state: QAState) -> QAState:
 
 
 async def generate_node(state: QAState) -> QAState:
-    llm = build_llm()
+    llm = build_llm(for_generate=True)
     history_text = ""
     if state.get("history"):
         rounds = [f"{m['role']}: {m['content'][:500]}" for m in state["history"][-6:]]

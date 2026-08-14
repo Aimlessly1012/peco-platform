@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     chat_model: str = "qwen3.7-plus"
 
     summary_model: str = ""  # 摘要用模型，空则复用 chat_model
+    # 问答「生成」环节用模型，空则复用 chat_model。推理型模型首字慢（实测 13s），
+    # 代码专用非推理模型 Qwen3-Coder-30B-A3B-Instruct 实测 0.9s 且引用标注更规范。
+    # 理解/分类与摘要不受影响，仍走各自配置
+    generate_model: str = ""
     summary_concurrency: int = 4
 
     # M7 D2：检索精排。base_url/api_key/model 任一为空 = 关闭（行为与 M6 完全一致）。
@@ -31,9 +35,14 @@ class Settings(BaseSettings):
     rerank_base_url: str = ""
     rerank_api_key: str = ""
     rerank_model: str = ""
-    rerank_timeout_seconds: float = 5
+    # 5s 实测经常超时（16 篇 + 8B 重排 + 跨境），精排一直静默降级等于白配
+    rerank_timeout_seconds: float = 15
     rerank_max_chars: int = 1500      # 单篇文档截断：8B 重排模型上下文有限，长文不增益
     rerank_candidate_multiplier: int = 3  # 候选池 = top_k × 这个倍数
+    # 送进生成 prompt 的资料总字符预算：实测 16 条 ≈ 7600 字符，是首字延迟的
+    # 主要成本。rerank 已把最相关的排在前面，砍掉尾部长尾对答案影响小
+    context_char_budget: int = 6000
+    context_min_items: int = 4        # 预算再紧也至少给这么多条，别让资料不够答不出
 
     @property
     def rerank_enabled(self) -> bool:
