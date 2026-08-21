@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     context_min_items: int = 4        # 预算再紧也至少给这么多条，别让资料不够答不出
 
     @property
+    def platform_auth_enabled(self) -> bool:
+        """M12：平台 GitHub 登录态是否启用（AUTH_JWT_SECRET 为空 = 关闭）。"""
+        return bool(self.auth_jwt_secret)
+
+    @property
     def rerank_enabled(self) -> bool:
         return bool(self.rerank_base_url and self.rerank_api_key and self.rerank_model)
 
@@ -62,6 +67,14 @@ class Settings(BaseSettings):
     # M8：管理员初始化。仅在库中没有 admin 时生效；已有 admin 后改这里不会覆盖
     admin_username: str = "admin"
     admin_password: str = ""
+
+    # M12 D2：接受 peco-platform 的 GitHub 登录态。
+    # 与平台 NEXTAUTH_SECRET 同值；为空 = 完全关闭，只走 M8 的密码登录（迁移期退路）。
+    # 平台把 NextAuth 默认的 JWE 换成了 JWS(HS256)，这里用 pyjwt 直接验签
+    auth_jwt_secret: str = ""
+    # 生产是 HTTP，cookie 名没有 __Secure- 前缀；上 HTTPS 后平台会改成 __Secure-next-auth.session-token
+    platform_cookie_name: str = "next-auth.session-token"
+
     repos_dir: Path = Path("./data/repos")
 
     retrieval_top_k: int = 8

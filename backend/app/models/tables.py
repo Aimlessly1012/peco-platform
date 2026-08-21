@@ -50,7 +50,11 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(128))
+    # M12：平台 GitHub 登录态的映射键。密码账号为 NULL，GitHub 用户没有密码
+    github_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, default=None
+    )
+    password_hash: Mapped[str] = mapped_column(String(128), default="")
     role: Mapped[str] = mapped_column(String(10), default=UserRole.MEMBER)
     # M11：禁用而非删除——账号与数据都留着，随时可恢复。非空即已禁用
     disabled_at: Mapped[datetime | None] = mapped_column(
