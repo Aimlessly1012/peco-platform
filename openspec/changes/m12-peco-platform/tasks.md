@@ -2,14 +2,14 @@
 
 ## 阶段一：平台骨架上线（`/rag` 保持现状不受影响）
 
-- [ ] P1 新建 peco-platform 仓库：Next.js 15 + TypeScript + Tailwind，落终端风设计令牌（paper/ink/accent、IBM Plex Mono、无圆角），与 RAG 现有令牌同源
-- [ ] P2 NextAuth + GitHub Provider：JWT strategy、jwt 回调每次查库取最新 status；`ADMIN_GITHUB_ID` 指定管理员；登录页与 pending 页
-- [ ] P3 users 表迁移（Postgres，与 RAG 共用库）：github_id/name/avatar_url/role/status/disabled_at/last_login_at；首次登录 upsert 建 pending 记录
-- [ ] P4 `/admin` 用户审核页：待审列表 + 红点提醒、批准/拒绝/禁用；仅 admin 可见
-- [ ] P5 作品集首页 `/`：作品卡片（RAG Coder、heitu 组件库），终端风
-- [ ] P6 `/front` 组件库展示：heitu 以 git 依赖引入，antd ConfigProvider 适配终端风 token，FormRender 与 charts 各一个可交互 demo
-- [ ] D1 平台容器化 + nginx 根路径接管（`/rag` 仍指向旧前端容器，两者共存）
-- [ ] V1 阶段一验收：GitHub 登录 → pending → 批准 → 可进；`/front` demo 可用；`/rag` 旧站不受影响
+- [x] P1 新建 peco-platform 仓库：Next.js 15 + TypeScript + Tailwind，落终端风设计令牌（paper/ink/accent、IBM Plex Mono、无圆角），与 RAG 现有令牌同源
+- [x] P2 NextAuth + GitHub Provider：JWT strategy、jwt 回调每次查库取最新 status；`ADMIN_GITHUB_ID` 指定管理员；登录页与 pending 页
+- [x] P3 users 表迁移（Postgres，与 RAG 共用库）：github_id/name/avatar_url/role/status/disabled_at/last_login_at；首次登录 upsert 建 pending 记录
+- [x] P4 `/admin` 用户审核页：待审列表 + 红点提醒、批准/拒绝/禁用；仅 admin 可见
+- [x] P5 作品集首页 `/`：作品卡片（RAG Coder、heitu 组件库），终端风
+- [x] P6 `/front` 组件库展示：heitu 以 git 依赖引入，antd ConfigProvider 适配终端风 token，FormRender 与 charts 各一个可交互 demo
+- [x] D1 平台容器化 + nginx 根路径接管（`/rag` 仍指向旧前端容器，两者共存）
+- [x] V1 阶段一验收：GitHub 登录 → pending → 批准 → 可进；`/front` demo 可用；`/rag` 旧站不受影响
 
 ## 阶段二：RAG 页面迁入与鉴权切换
 
