@@ -35,3 +35,25 @@ M7 部署时 80 端口被 zc_erp 的 web 容器占着，RAG 的 `/rag` 路由是
 永久缓存，届时访客仍被强制弹去 /rag 且清不掉。
 
 回收：磁盘释放约 1.8GB（镜像 1.7GB + 卷），服务器上现在只剩 RAG_coder 一套。
+
+
+## M12：作品集平台接管根路径，RAG 转为纯后端（2026-08-22）
+
+RAG Coder 并入 peco-platform（Next.js，另一个仓库）。现在服务器上的形态：
+
+```
+nginx (rag_coder-nginx-1, 占 80)
+  ├─ /            → peco-platform-platform-1:3000   作品集 + /front + /login + /admin + /rag/* 页面
+  └─ /rag/api/    → backend:8000                    剥前缀，SSE 三件套照旧
+platform 与 backend 共用 rag_coder_default 网络与同一个 Postgres
+```
+
+**踩过的两个坑，重装时注意**：
+1. `docker-compose.server.yml` 是服务器专有文件（rsync 时被 --exclude），删 prod.yml 里的
+   frontend 服务后，这里的 `frontend:` 段与 nginx 的 `depends_on: frontend` 会变成悬空引用，
+   compose 直接报 "invalid compose project"、连带迁移都跑不了。改完这两处才恢复。
+2. nginx 配置是**单文件挂载**，同步要用 `rsync --inplace`——常规 rsync 换 inode 会让容器里的
+   挂载断链，改了等于没改。
+
+**鉴权**：平台的 NextAuth 用 JWS(HS256) 签 cookie，后端用同一个密钥（`AUTH_JWT_SECRET`
+= 平台的 `NEXTAUTH_SECRET`）验签。两边密钥必须一致，否则登录后访问 /rag/api 一律 401。
