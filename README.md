@@ -43,6 +43,7 @@ npm run dev
 | `NEXTAUTH_SECRET` | `openssl rand -base64 32` 生成 |
 | `ADMIN_GITHUB_ID` | 你的 GitHub **数字 id**（不是用户名）：`curl -s https://api.github.com/users/<用户名> \| grep '"id"'`。这个账号首次登录即 admin + approved，其余人一律 pending |
 | Postgres | 复用 RAG 那套 compose 的库（默认 `localhost:5433`）；`npm run migrate` 会建 `platform_users` 表 |
+| RAG 后端 | 页面直连同域 `/rag/api/*`（nginx 剥前缀转 FastAPI）。本地后端跑在别的端口时用 `NEXT_PUBLIC_RAG_API_BASE` 覆盖 |
 
 ### 路由与访问控制
 
@@ -50,7 +51,10 @@ npm run dev
 |---|---|
 | `/`、`/front`、`/login`、`/pending` | 公开 |
 | `/admin` | 仅 admin（middleware + API 双重校验） |
-| `/rag/*` | 需登录且 `status=approved`、未禁用（阶段二迁入页面后生效） |
+| `/rag` | 项目列表 · 需登录且 `status=approved`、未禁用 |
+| `/rag/projects/[id]` | 项目详情：项目理解 / 功能地图 / 索引记录 |
+| `/rag/projects/[id]/chat` | 代码问答（SSE 流式 + `[n]` 引用联动） |
+| `/rag/mcp` | MCP 接入说明 |
 
 审核状态在 NextAuth 的 `jwt` 回调里**每次刷新都回库取最新值**——管理员批准或禁用后
 立刻生效，不用等 token 过期，对方也不必重新登录。

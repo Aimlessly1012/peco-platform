@@ -1,3 +1,4 @@
+import { SignJWT, jwtVerify } from "jose";
 import type { NextAuthOptions } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
 import { getByGithubId, upsertOnLogin, type UserRole, type UserStatus } from "./users";
@@ -42,6 +43,39 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   session: { strategy: "jwt" },
+
+  /**
+   * 把 NextAuth 默认的 JWE（加密）换成 JWS（HS256 签名）。
+   *
+   * 这是跨服务鉴权的关键约定：RAG 的 FastAPI 后端用同一个密钥（AUTH_JWT_SECRET）
+   * 直接验签这个 cookie，从而不需要在平台加一层 API 代理——那层代理要转发 SSE
+   * 流式与 MCP 长连接，风险远大于收益（见 design.md D2）。
+   *
+   * 代价：token 内容可被解码查看（但不可篡改）。里面只有 githubId/role/status，
+   * 不含密钥或隐私，可接受。
+   */
+  jwt: {
+    async encode({ token, secret, maxAge }) {
+      const key = new TextEncoder().encode(String(secret));
+      const now = Math.floor(Date.now() / 1000);
+      return await new SignJWT({ ...token })
+        .setProtectedHeader({ alg: "HS256" })
+        .setIssuedAt(now)
+        .setExpirationTime(now + (maxAge ?? 30 * 24 * 60 * 60))
+        .sign(key);
+    },
+    async decode({ token, secret }) {
+      if (!token) return null;
+      try {
+        const key = new TextEncoder().encode(String(secret));
+        const { payload } = await jwtVerify(token, key, { algorithms: ["HS256"] });
+        return payload as Record<string, unknown>;
+      } catch {
+        // 过期或被篡改：当作未登录，让 NextAuth 走重新登录流程
+        return null;
+      }
+    },
+  },
   pages: {
     signIn: "/login",
     error: "/login",

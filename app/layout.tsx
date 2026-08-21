@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Providers from "@/components/Providers";
 import TopBar from "@/components/TopBar";
+import "./fonts.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

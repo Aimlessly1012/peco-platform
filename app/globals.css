@@ -1,5 +1,5 @@
 /* 终端风基础层：与 RAG Coder 前端同源（M12 D4 统一令牌）。
-   字体走自托管而非 CDN——阶段二迁 RAG 页面时把 fonts.css 与字体文件一并搬过来。 */
+   字体自托管（fonts/ + app/fonts.css，由 scripts/fetch-fonts.py 生成），不走 CDN。 */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
