@@ -14,3 +14,24 @@
    docker compose -f docker-compose.prod.yml -f docker-compose.server.yml up -d
 4. 坑位记录：改挂载的单文件禁用 sed -i（换 inode 后容器 mount 断链，必须 force-recreate）；
    MCP 鉴权在 --root-path 部署下曾被绕过（auth.py 已修，见 test_root_path_deployment_still_guarded）。
+
+
+## M12：zc_erp 下线，RAG 自持 80 端口（2026-08-17）
+
+用户要求删除服务器上另一套应用 zc_erp（数据不保留）。**它不是一个普通的删除**：
+M7 部署时 80 端口被 zc_erp 的 web 容器占着，RAG 的 `/rag` 路由是寄在**它的 nginx**
+里的，RAG 自己的容器只绑 127.0.0.1——直接删会让公网入口整个消失。
+
+执行顺序（先换入口再删，全程留退路）：
+1. 从 zc_erp-web-1 里导出 nginx 配置作基础 → 写成 `deploy/nginx-server.conf`
+   （上游改用 compose 服务名 backend/frontend，容器重建改名也不断）
+2. 重写 `docker-compose.server.yml`：去掉 `zc_erp_default` 外部网络引用（那个网络
+   即将随 zc_erp 消失），加 nginx 服务占 80
+3. `docker compose stop` zc_erp（先停不删）→ 起 RAG 的 nginx → 公网验证
+   （/rag 200、API 401/200、MCP 握手、根路径 302）
+4. 验证通过后才 `down -v` 清容器/卷/网络 + 删镜像 + 删目录
+
+**根路径用 302 不用 301**：作品集（heitu-platform）以后要占根路径，301 会被浏览器
+永久缓存，届时访客仍被强制弹去 /rag 且清不掉。
+
+回收：磁盘释放约 1.8GB（镜像 1.7GB + 卷），服务器上现在只剩 RAG_coder 一套。

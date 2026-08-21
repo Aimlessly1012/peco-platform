@@ -1,14 +1,23 @@
-# 服务器 override：把 RAG 前后端挂进 zc_erp 的网络，zc_erp-web 的 nginx 直连容器名
+# 服务器 override（M12 起）：RAG 自持 80 端口的 nginx 入口。
+#
+# 历史：M7 部署时 80 被 zc_erp 的 web 容器占着，RAG 只能把前后端挂进 zc_erp_default
+# 网络、把路由寄在它的 nginx 里。zc_erp 下线后不再需要外部网络，入口收归自己。
+#
 # 用法：docker compose -f docker-compose.prod.yml -f docker-compose.server.yml up -d
-networks:
-  zc_erp_default:
-    external: true
 services:
-  backend:
-    networks:
-      - default
-      - zc_erp_default
   frontend:
-    networks:
-      - default
-      - zc_erp_default
+    environment:
+      # Next standalone 用 HOSTNAME 解析出的单个 IP 绑定，容器多网络时会只监听
+      # 其中一个网段导致 nginx 502。锁 0.0.0.0 监听全部，重建也不会翻车
+      HOSTNAME: 0.0.0.0
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
