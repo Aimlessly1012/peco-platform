@@ -25,22 +25,33 @@ peco-platform/（新仓库）           RAG_coder/（现仓库，转纯后端）
 
 `/rag` 不再单独转发到一个前端容器——它已是平台内部路由。RAG 前端容器下线。
 
-## D2 认证：平台签发，后端验证
+## D2 认证：共享签名 JWT，后端直接验 cookie（实施时修订）
 
-NextAuth 用 **JWT strategy + GitHub Provider**，`jwt` 回调每次查库取最新 status
-（沿用 x-blog 的做法：管理员审批后立即生效，与 M11 给 RAG 做禁用时同一个思路）。
+NextAuth 用 **JWT strategy + GitHub Provider**，`jwt` 回调每次查库取最新 status。
 
-**FastAPI 怎么验证**：平台的服务端在转发到 `/rag/api/*` 时，用共享密钥签一个短时效
-的内部 JWT（含 github_id、role、status），后端用同一密钥验签。
+**原设计**是"平台在转发 `/rag/api/*` 时签发内部令牌"，这意味着要在平台加一层 API 代理。
+实施前重新评估后**放弃该方案**：代理层要转发 SSE 流式（聊天 token、索引进度）与 MCP
+长连接，而这条链路我们已经踩过两个坑（M6 的 nginx 缓冲吞流、M7 的 root_path 让 MCP
+鉴权失效）。为了一次鉴权而把整条实时链路重新过一遍风险，不划算。
 
-选它而不是"后端调平台 session 接口"的理由：
-- 无运行时依赖（平台重启不影响已发出的请求）
-- 无额外网络往返
-- 密钥是我们自己定的对称密钥，不碰 NextAuth 的 JWE 加密细节（那才是脆弱的耦合）
+**改用**：NextAuth 自定义 `encode`/`decode`，把默认的 JWE（加密）换成 **JWS（HS256 签名）**，
+后端用同一个密钥（`AUTH_JWT_SECRET`）验签 cookie 里的 token。
 
-浏览器直连 `/rag/api/*` 的路径（比如 SSE 与 MCP）需要平台侧的 route handler 代理，
-或由 nginx 注入——**这是本设计最需要在实施时验证的一点**，SSE 流式与 MCP 长连接
-都要确保代理不破坏（M6 踩过缓冲的坑、M7 踩过 root_path 的坑）。
+```
+浏览器 --cookie--> nginx --/rag/api/*--> FastAPI
+                                          └ 读 next-auth.session-token
+                                            用共享密钥验签 → 取 github_id/role/status
+```
+
+好处：
+- **浏览器仍直连后端**，SSE 与 MCP 链路一个字节都不用改
+- 无代理层、无运行时依赖（平台重启不影响后端鉴权）
+- 标准 JWS，Python 侧 pyjwt 直接验，不用手写 NextAuth 的 JWE 解密
+
+代价：token 内容可被解码查看（但不可篡改）。里面只有 github_id / role / status，
+不含密钥或个人隐私，可接受。
+
+MCP 端点继续走独立 `MCP_AUTH_TOKEN`，与账号体系无关（M7/M8 已确立）。
 
 ## D3 用户模型统一
 
