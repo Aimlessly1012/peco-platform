@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# peco-platform
 
-## Getting Started
+个人作品集平台。一个前端、一次 GitHub 登录、统一终端风视觉。
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+/          作品集首页
+/login     GitHub OAuth 登录
+/pending   待审核（申请人登录后落这里）
+/front     heitu 组件库展示
+/rag/*     RAG Coder 页面（阶段二自 RAG_coder/frontend 迁入）
+/admin     用户审核
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 架构要点
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**后端不在本仓库**。RAG Coder 的后端（FastAPI + LangGraph + Neo4j + tree-sitter）
+保持独立服务，本平台通过 `/rag/api/*` 调用它——那套 Python 生态无法也不必并进 Next.js。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**数据库**与 RAG 后端共用同一个 Postgres：平台写 users（GitHub 登录 upsert、审核状态），
+后端只读校验。Neo4j 是 RAG 专用，平台不碰。
 
-## Learn More
+**视觉统一靠设计令牌**：`tailwind.config.ts` 与 RAG 前端同源（paper/ink/accent、
+IBM Plex Mono、无圆角）；`/front` 的 antd 组件经 ConfigProvider 适配同一套 token，
+不用重写页面就能全站一致。
 
-To learn more about Next.js, take a look at the following resources:
+**版本刻意对齐 RAG 前端**（Next 15 + Tailwind v3，而非脚手架默认的 16 + v4）：
+阶段二要迁十几个含 markmap / mermaid / SSE 的复杂页面，版本一致才没有摩擦。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 开发
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run dev
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+设计文档见 RAG_coder 仓库的 `openspec/changes/m12-peco-platform/`。

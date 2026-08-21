@@ -1,26 +1,21 @@
-@import "tailwindcss";
+/* 终端风基础层：与 RAG Coder 前端同源（M12 D4 统一令牌）。
+   字体走自托管而非 CDN——阶段二迁 RAG 页面时把 fonts.css 与字体文件一并搬过来。 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply font-mono bg-paper text-ink antialiased;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* 终端风格：全局无圆角 */
+  input,
+  textarea,
+  button {
+    @apply rounded-none font-mono;
+  }
+  textarea:focus,
+  input:focus {
+    @apply outline-none border-accent;
+  }
 }
