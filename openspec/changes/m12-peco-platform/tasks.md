@@ -21,6 +21,6 @@
 
 ## 阶段三：清理
 
-- [ ] B3 删除 M8 的密码登录、注册、邀请码接口与 invite_codes 表；删除 RAG_coder/frontend 目录
-- [ ] D2 nginx 切换：`/rag` 归平台内部路由，旧前端容器下线
-- [ ] V3 全站复测 + 提交归档
+- [x] B3 删除 M8 的密码登录、注册、邀请码接口与 invite_codes 表；删除 RAG_coder/frontend 目录
+- [x] D2 nginx 切换：`/rag` 归平台内部路由，旧前端容器下线
+- [x] V3 全站复测 + 提交归档

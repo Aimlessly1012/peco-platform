@@ -15,7 +15,7 @@ from app.graph.client import close_driver, ensure_vector_index
 from app.mcp_server.auth import MCPAuthMiddleware
 from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
-from app.services.auth.bootstrap import check_secret_key, ensure_admin_user
+from app.services.auth.bootstrap import check_secret_key
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,7 +48,6 @@ async def _recover_stale_jobs() -> None:
 async def lifespan(app: FastAPI):
     await ensure_vector_index()
     check_secret_key()  # M8：默认/过短的 SECRET_KEY 会让登录态可伪造
-    await ensure_admin_user()  # M8：无 admin 且配了 ADMIN_PASSWORD 时创建
     await _recover_stale_jobs()
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
     # MCP session manager 必须在这里启动：Starlette 的 Mount 不传播 lifespan，

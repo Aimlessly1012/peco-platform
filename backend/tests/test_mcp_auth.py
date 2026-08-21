@@ -29,7 +29,6 @@ def authed_app(monkeypatch, test_db):
 
     monkeypatch.setattr("app.main.ensure_vector_index", noop)
     monkeypatch.setattr("app.main.close_driver", noop)
-    monkeypatch.setattr("app.main.ensure_admin_user", noop)
 
     from app.main import create_app
 

@@ -5,7 +5,6 @@
 root_path 绕过问题），账号守卫不该伸进去。
 """
 import logging
-import uuid
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,6 @@ from app.services.auth.platform import (
     is_approved,
     resolve_platform_user,
 )
-from app.services.auth.security import COOKIE_NAME, decode_token
 
 logger = logging.getLogger(__name__)
 
@@ -58,23 +56,10 @@ async def current_user(
             return None
         return user
 
-    payload = decode_token(request.cookies.get(COOKIE_NAME, ""))
-    if payload is None:
-        return None
-    try:
-        user_id = uuid.UUID(str(payload.get("sub")))
-    except (ValueError, TypeError):
-        return None
-    # 每次查库：账号被删/改角色/被禁用后，旧 token 立即失效（token 里的信息不可信）
-    user = await session.get(User, user_id)
-    if user is None:
-        return None
-    if user.disabled_at is not None:
-        # M11：JWT 是无状态的，不查库的话被禁用户能拿旧 token 用满 7 天。
-        # 这次查询本来就有（上面那行），禁用判断是白捡的
-        logger.info("已禁用账号尝试访问：%s", user.username)
-        return None
-    return user
+    # M12 阶段三：密码登录已删除，平台 GitHub 登录态是唯一来源。
+    # 旧的 SECRET_KEY 签名路径一并移除——留着一条无人能签发的验证分支，等于给
+    # 拿到 SECRET_KEY 的人留了一扇伪造登录态的门。
+    return None
 
 
 async def require_user(user: User | None = Depends(current_user)) -> User:

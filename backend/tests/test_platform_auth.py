@@ -16,7 +16,6 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.models.tables import User, UserRole
 from app.services.auth.platform import decode_platform_token, is_approved
-from app.services.auth.security import COOKIE_NAME, create_token, hash_password
 
 PLATFORM_SECRET = "platform-shared-secret-at-least-32-bytes!!"
 COOKIE = "next-auth.session-token"
@@ -172,7 +171,6 @@ async def test_first_visit_creates_local_user(anon_client, test_db, platform_on)
 
     user = await get_user_by_github(test_db, "888")
     assert user is not None
-    assert user.password_hash == ""          # GitHub 用户没有密码
     assert user.role == UserRole.MEMBER
 
 
@@ -227,46 +225,17 @@ async def test_locally_disabled_user_blocked(anon_client, test_db, platform_on):
     assert (await anon_client.get("/auth/me")).status_code == 401
 
 
-async def test_invalid_platform_token_falls_through_to_password(
-    anon_client, test_db, platform_on
-):
-    """平台 cookie 无效时不能直接 401——密码登录还在迁移期，得让它有机会兜住。"""
-    async with test_db() as session:
-        user = User(
-            username="legacy", password_hash=hash_password("pw123456"),
-            role=UserRole.MEMBER,
-        )
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
-        user_id = user.id
 
+async def test_invalid_platform_token_is_rejected(anon_client, test_db, platform_on):
+    """平台 cookie 无效即 401。
+
+    迁移期这里曾回落到密码登录；M12 阶段三密码登录已删除，坏 token 不再有任何兜底
+    ——留着一条无人能签发的验证分支，等于给拿到 SECRET_KEY 的人留了伪造登录态的门。
+    """
     anon_client.cookies.set(COOKIE, "garbage-token")
-    anon_client.cookies.set(COOKIE_NAME, create_token(str(user_id), UserRole.MEMBER))
 
-    resp = await anon_client.get("/auth/me")
-
-    assert resp.status_code == 200
-    assert resp.json()["username"] == "legacy"
-
-
-async def test_password_login_untouched_when_platform_disabled(
-    anon_client, test_db, platform_off
-):
-    """spec: AUTH_JWT_SECRET 为空时行为与 M8 完全一致。"""
-    async with test_db() as session:
-        session.add(User(
-            username="legacy", password_hash=hash_password("pw123456"),
-            role=UserRole.MEMBER,
-        ))
-        await session.commit()
-
-    resp = await anon_client.post(
-        "/auth/login", json={"username": "legacy", "password": "pw123456"}
-    )
-    assert resp.status_code == 200
-    assert (await anon_client.get("/auth/me")).json()["username"] == "legacy"
-
+    assert (await anon_client.get("/projects")).status_code == 401
+    assert (await anon_client.get("/auth/me")).status_code == 401
 
 async def test_platform_cookie_ignored_when_disabled(
     anon_client, test_db, platform_off

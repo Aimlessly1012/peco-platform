@@ -6,7 +6,6 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.tables import User, UserRole
-from app.services.auth.security import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -35,29 +34,3 @@ def check_secret_key() -> bool:
     return True
 
 
-async def ensure_admin_user() -> None:
-    """无 admin 且配了 ADMIN_PASSWORD 时创建管理员（D2）。
-
-    已有 admin 后不因 env 变更覆盖——否则每次重启都会把用户改过的密码冲掉。
-    """
-    async with SessionLocal() as session:
-        existing = await session.scalar(
-            select(User).where(User.role == UserRole.ADMIN).limit(1)
-        )
-        if existing is not None:
-            logger.info("管理员已存在（%s），跳过初始化", existing.username)
-            return
-        if not settings.admin_password:
-            logger.warning(
-                "未配置 ADMIN_PASSWORD 且库中没有管理员——系统可启动但无人能登录。"
-                "请在 .env 设置 ADMIN_PASSWORD 后重启"
-            )
-            return
-        admin = User(
-            username=settings.admin_username or "admin",
-            password_hash=hash_password(settings.admin_password),
-            role=UserRole.ADMIN,
-        )
-        session.add(admin)
-        await session.commit()
-        logger.info("已创建管理员账号：%s", admin.username)

@@ -116,19 +116,52 @@ async def test_db(tmp_path, monkeypatch):
     await engine.dispose()
 
 
-async def seed_user(session_factory, username: str, role: str):
-    """建一个用户并返回 (user_id, 登录 cookie)。走真实 JWT，不 mock 依赖。"""
-    from app.models.tables import User
-    from app.services.auth.security import COOKIE_NAME, create_token, hash_password
+PLATFORM_TEST_SECRET = "conftest-platform-secret-at-least-32-chars!"
 
+
+@pytest.fixture(autouse=True)
+def _platform_auth_on(monkeypatch):
+    """测试默认启用平台鉴权：M12 阶段三后它是唯一的登录态来源。
+
+    要测「没配密钥」的场景，用例里自行 monkeypatch 成空串即可。
+    """
+    monkeypatch.setattr(settings, "auth_jwt_secret", PLATFORM_TEST_SECRET)
+
+
+async def seed_user(session_factory, username: str, role: str):
+    """建一个用户并返回 (user_id, 平台登录态 cookie)。
+
+    M12 阶段三起密码登录已删除，登录态一律来自平台的 GitHub 会话——这里签一个
+    与平台 NextAuth 同格式的 JWS(HS256)，走的是真实验签路径，不 mock 依赖。
+    """
+    import jwt as pyjwt
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.config import settings
+    from app.models.tables import User
+
+    github_id = f"gh-{username}"
     async with session_factory() as session:
-        user = User(
-            username=username, password_hash=hash_password("pw123456"), role=role
-        )
+        user = User(username=username, github_id=github_id, role=role)
         session.add(user)
         await session.commit()
         await session.refresh(user)
-        return user.id, {COOKIE_NAME: create_token(str(user.id), role)}
+        uid = user.id
+
+    now = datetime.now(timezone.utc)
+    token = pyjwt.encode(
+        {
+            "githubId": github_id,
+            "name": username,
+            "role": role,
+            "status": "approved",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=12)).timestamp()),
+        },
+        settings.auth_jwt_secret or PLATFORM_TEST_SECRET,
+        algorithm="HS256",
+    )
+    return uid, {settings.platform_cookie_name: token}
 
 
 @pytest.fixture

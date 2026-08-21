@@ -2,7 +2,7 @@
 #
 # 与开发版 docker-compose.yml 的差别：
 #   - postgres / neo4j 不映射宿主端口（只在 compose 网络内互通，不对外暴露）
-#   - backend / frontend 只绑 127.0.0.1，流量一律经 Nginx 进来
+#   - backend 只绑 127.0.0.1，流量一律经 Nginx 进来（前端已并入 peco-platform）
 #   - restart: unless-stopped；没有源码卷挂载，跑的就是镜像里的代码
 #
 # 启动：docker compose -f docker-compose.prod.yml up -d --build
@@ -61,18 +61,6 @@ services:
       neo4j:
         condition: service_healthy
 
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        # NEXT_PUBLIC_* 是构建期变量，必须在 build 时注入，运行时改 env 无效
-        NEXT_PUBLIC_BASE_PATH: /rag
-        NEXT_PUBLIC_API_BASE: /rag/api
-    ports:
-      - "127.0.0.1:3300:3000"        # 3300 避开服务器上已有项目常用的 3000
-    restart: unless-stopped
-    depends_on:
-      - backend
 
 volumes:
   pgdata:

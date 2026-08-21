@@ -112,7 +112,6 @@ async def resolve_platform_user(claims: dict, session) -> "User | None":
     user = User(
         username=_unique_username(claims, github_id),
         github_id=github_id,
-        password_hash="",          # GitHub 用户没有密码，也就不能走密码登录
         role=role,
     )
     session.add(user)

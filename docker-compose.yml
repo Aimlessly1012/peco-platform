@@ -49,14 +49,6 @@ services:
       neo4j:
         condition: service_healthy
 
-  frontend:
-    build: ./frontend
-    environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:9200
-    ports:
-      - "3200:3000"
-    depends_on:
-      - backend
 
 volumes:
   pgdata:

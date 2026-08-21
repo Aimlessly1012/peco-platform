@@ -13,7 +13,6 @@ from sqlalchemy import select
 from app.models.tables import (
     ChatMessage,
     ChatSession,
-    InviteCode,
     Project,
     ProjectStatus,
     User,
@@ -24,15 +23,35 @@ from app.api.auth import (
     CANNOT_DISABLE_SELF,
     disable_blocker,
 )
-from app.services.auth.security import COOKIE_NAME, create_token, hash_password
-from tests.conftest import seed_user
+from app.core.config import settings
+from tests.conftest import PLATFORM_TEST_SECRET, seed_user
+
+
+def platform_cookie(user: User) -> tuple[str, str]:
+    """给已建好的 User 签一个平台登录态（M12 阶段三后唯一的登录方式）。"""
+    import jwt as pyjwt
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    token = pyjwt.encode(
+        {
+            "githubId": user.github_id,
+            "name": user.username,
+            "role": user.role,
+            "status": "approved",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=12)).timestamp()),
+        },
+        settings.auth_jwt_secret or PLATFORM_TEST_SECRET,
+        algorithm="HS256",
+    )
+    return settings.platform_cookie_name, token
 
 
 async def make_user(test_db, username, role=UserRole.MEMBER, **fields) -> User:
     async with test_db() as session:
         user = User(
-            username=username, password_hash=hash_password("pw123456"),
-            role=role, **fields,
+            username=username, github_id=f"gh-{username}", role=role, **fields,
         )
         session.add(user)
         await session.commit()
@@ -48,58 +67,8 @@ async def get_user(test_db, user_id) -> User:
 # ---------------- B2 登录 ----------------
 
 
-async def test_login_records_last_login(anon_client, test_db):
-    user = await make_user(test_db, "alice")
-    assert user.last_login_at is None
-
-    await anon_client.post(
-        "/auth/login", json={"username": "alice", "password": "pw123456"}
-    )
-
-    refreshed = await get_user(test_db, user.id)
-    assert refreshed.last_login_at is not None
 
 
-async def test_disabled_user_cannot_login(anon_client, test_db):
-    """spec 场景: 被禁用账号输入正确密码 → 401，文案与密码错误一致。"""
-    await make_user(test_db, "banned", disabled_at=datetime.now(timezone.utc))
-
-    resp = await anon_client.post(
-        "/auth/login", json={"username": "banned", "password": "pw123456"}
-    )
-
-    assert resp.status_code == 401
-    assert resp.json()["detail"] == "用户名或密码不正确"   # 不泄露"被禁用"这个事实
-    assert resp.cookies.get(COOKIE_NAME) is None
-
-
-async def test_disabled_login_message_matches_wrong_password(anon_client, test_db):
-    """两条路径的文案必须逐字相同，否则可以据此枚举出哪些账号被禁。"""
-    await make_user(test_db, "banned", disabled_at=datetime.now(timezone.utc))
-    await make_user(test_db, "normal")
-
-    disabled = await anon_client.post(
-        "/auth/login", json={"username": "banned", "password": "pw123456"}
-    )
-    wrong_pw = await anon_client.post(
-        "/auth/login", json={"username": "normal", "password": "wrong-password"}
-    )
-
-    assert disabled.status_code == wrong_pw.status_code == 401
-    assert disabled.json() == wrong_pw.json()
-
-
-async def test_enabled_user_can_login_again(anon_client, test_db):
-    user = await make_user(test_db, "restored", disabled_at=datetime.now(timezone.utc))
-    async with test_db() as session:
-        target = await session.get(User, user.id)
-        target.disabled_at = None
-        await session.commit()
-
-    resp = await anon_client.post(
-        "/auth/login", json={"username": "restored", "password": "pw123456"}
-    )
-    assert resp.status_code == 200
 
 
 # ---------------- B3 守卫即刻生效 ----------------
@@ -111,7 +80,7 @@ async def test_valid_token_dies_immediately_on_disable(anon_client, test_db):
     这是 M11 最容易做错的一点：JWT 无状态，不查库的话旧 token 能用满 7 天。
     """
     user = await make_user(test_db, "victim")
-    anon_client.cookies.set(COOKIE_NAME, create_token(str(user.id), user.role))
+    anon_client.cookies.set(*platform_cookie(user))
     assert (await anon_client.get("/auth/me")).status_code == 200
 
     async with test_db() as session:
@@ -127,7 +96,7 @@ async def test_valid_token_dies_immediately_on_disable(anon_client, test_db):
 async def test_re_enable_restores_access_with_same_token(anon_client, test_db):
     """恢复后同一个未过期 token 应该又能用——禁用不是签名失效。"""
     user = await make_user(test_db, "victim", disabled_at=datetime.now(timezone.utc))
-    anon_client.cookies.set(COOKIE_NAME, create_token(str(user.id), user.role))
+    anon_client.cookies.set(*platform_cookie(user))
     assert (await anon_client.get("/auth/me")).status_code == 401
 
     async with test_db() as session:
@@ -142,7 +111,7 @@ async def test_disabled_admin_loses_admin_routes(anon_client, test_db):
     """被禁的 admin 连管理接口也进不去（守卫在角色判断之前）。"""
     user = await make_user(test_db, "exadmin", UserRole.ADMIN,
                            disabled_at=datetime.now(timezone.utc))
-    anon_client.cookies.set(COOKIE_NAME, create_token(str(user.id), UserRole.ADMIN))
+    anon_client.cookies.set(*platform_cookie(user))
 
     assert (await anon_client.get("/auth/users")).status_code == 401
 
@@ -161,11 +130,9 @@ async def test_user_list_requires_login(anon_client):
 
 
 async def test_user_list_shows_profile(api_client, test_db):
-    """spec 场景: 角色、注册与最后登录、来源邀请码、会话与提问数量。"""
+    """spec 场景: 角色、注册时间、会话与提问数量（邀请码列随 M8 体系一起删了）。"""
     member = await make_user(test_db, "bob")
     async with test_db() as session:
-        session.add(InviteCode(code="ABCD2345", used_by=member.id,
-                               used_at=datetime.now(timezone.utc)))
         project = Project(name="p", git_url="https://x.git", status=ProjectStatus.READY)
         session.add(project)
         await session.commit()
@@ -187,18 +154,16 @@ async def test_user_list_shows_profile(api_client, test_db):
 
     assert bob["role"] == "member"
     assert bob["disabled"] is False
-    assert bob["invite_code"] == "ABCD2345"
     assert bob["session_count"] == 1
     assert bob["message_count"] == 2      # 只算用户提问，不含 assistant 回复
     assert bob["created_at"]
 
 
-async def test_admin_without_invite_shows_null(api_client, test_db):
-    """管理员初始账号没有邀请码，要能正常显示空而不是报错。"""
+async def test_admin_profile_listed(api_client, test_db):
+    """管理员自己也在列表里，角色与计数正确。"""
     rows = (await api_client.get("/auth/users")).json()
     admin = next(r for r in rows if r["username"] == "admin")
 
-    assert admin["invite_code"] is None
     assert admin["role"] == "admin"
     assert admin["session_count"] == 0
     assert admin["message_count"] == 0
@@ -256,8 +221,12 @@ async def test_disable_enable_responses_carry_timestamp(api_client, test_db):
     assert enabled["disabled_at"] is None
 
 
-async def test_user_list_never_exposes_password_hash(api_client, test_db):
-    """列表是给人看的画像，密码哈希绝不能出现在响应里。"""
+async def test_user_list_never_exposes_credentials(api_client, test_db):
+    """列表是给人看的画像，任何凭据都不该出现在响应里。
+
+    M12 阶段三密码字段已随体系删除，这条断言留着当护栏：将来若再引入任何
+    凭据类字段，这里会第一时间拦下。
+    """
     import json
 
     await make_user(test_db, "bob")
@@ -336,7 +305,7 @@ async def test_cannot_disable_last_active_admin(api_client, test_db):
 
 def make_stub_user(role=UserRole.MEMBER, disabled=False, user_id=None):
     return User(
-        id=user_id or uuid.uuid4(), username="x", password_hash="h", role=role,
+        id=user_id or uuid.uuid4(), username="x", role=role,
         disabled_at=datetime.now(timezone.utc) if disabled else None,
     )
 

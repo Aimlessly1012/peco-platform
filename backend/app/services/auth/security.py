@@ -36,48 +36,6 @@ def _encode(password: str) -> bytes:
     return raw[:BCRYPT_MAX_BYTES].decode("utf-8", errors="ignore").encode("utf-8")
 
 
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(_encode(password), bcrypt.gensalt()).decode("utf-8")
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    """校验失败一律 False——坏哈希（历史脏数据）不该把请求炸成 500。"""
-    if not password_hash:
-        return False
-    try:
-        return bcrypt.checkpw(_encode(password), password_hash.encode("utf-8"))
-    except (ValueError, TypeError):
-        logger.warning("密码哈希格式非法，校验按失败处理")
-        return False
 
-
-def create_token(user_id: str, role: str, ttl_days: int = TOKEN_TTL_DAYS) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user_id),
-        "role": role,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(days=ttl_days)).timestamp()),
-    }
-    return jwt.encode(payload, settings.secret_key, algorithm=JWT_ALGORITHM)
-
-
-def decode_token(token: str) -> dict | None:
-    """解析并校验签名与过期。任何问题返回 None（调用方一律当未登录）。"""
-    if not token:
-        return None
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        logger.info("登录态已过期")
-        return None
-    except jwt.InvalidTokenError:
-        logger.warning("登录态签名非法")
-        return None
-    if not payload.get("sub"):
-        return None
-    return payload
-
-
-def generate_invite_code() -> str:
-    return "".join(secrets.choice(INVITE_ALPHABET) for _ in range(INVITE_LENGTH))

@@ -54,7 +54,6 @@ class User(Base):
     github_id: Mapped[str | None] = mapped_column(
         String(64), unique=True, index=True, default=None
     )
-    password_hash: Mapped[str] = mapped_column(String(128), default="")
     role: Mapped[str] = mapped_column(String(10), default=UserRole.MEMBER)
     # M11：禁用而非删除——账号与数据都留着，随时可恢复。非空即已禁用
     disabled_at: Mapped[datetime | None] = mapped_column(
@@ -69,24 +68,6 @@ class User(Base):
     def is_active(self) -> bool:
         return self.disabled_at is None
 
-
-class InviteCode(Base):
-    """一次性邀请码：used_by 非空即已消耗（注册时在同一事务里置位，防并发双花）。"""
-
-    __tablename__ = "invite_codes"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    used_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), default=None
-    )
-    used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class IndexDepth:
