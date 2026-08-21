@@ -30,7 +30,29 @@ IBM Plex Mono、无圆角）；`/front` 的 antd 组件经 ConfigProvider 适配
 
 ```bash
 npm install
+cp .env.local.example .env.local   # 按注释填写，GitHub OAuth 凭据要自己申请
+npm run migrate                    # 建 platform_users 表（需要 Postgres 已启动）
 npm run dev
 ```
+
+### 需要手动准备的东西
+
+| 项 | 说明 |
+|---|---|
+| GitHub OAuth App | <https://github.com/settings/developers> 新建，回调填 `<站点地址>/api/auth/callback/github`，把 Client ID / Secret 写进 `.env.local` |
+| `NEXTAUTH_SECRET` | `openssl rand -base64 32` 生成 |
+| `ADMIN_GITHUB_ID` | 你的 GitHub **数字 id**（不是用户名）：`curl -s https://api.github.com/users/<用户名> \| grep '"id"'`。这个账号首次登录即 admin + approved，其余人一律 pending |
+| Postgres | 复用 RAG 那套 compose 的库（默认 `localhost:5433`）；`npm run migrate` 会建 `platform_users` 表 |
+
+### 路由与访问控制
+
+| 路由 | 谁能进 |
+|---|---|
+| `/`、`/front`、`/login`、`/pending` | 公开 |
+| `/admin` | 仅 admin（middleware + API 双重校验） |
+| `/rag/*` | 需登录且 `status=approved`、未禁用（阶段二迁入页面后生效） |
+
+审核状态在 NextAuth 的 `jwt` 回调里**每次刷新都回库取最新值**——管理员批准或禁用后
+立刻生效，不用等 token 过期，对方也不必重新登录。
 
 设计文档见 RAG_coder 仓库的 `openspec/changes/m12-peco-platform/`。

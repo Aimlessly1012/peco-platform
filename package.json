@@ -6,23 +6,34 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
+    "antd": "^5.29.3",
+    "axios": "^1.19.0",
+    "heitu": "^1.1.0",
+    "js-cookie": "^3.0.8",
     "next": "15.5.23",
+    "next-auth": "^4.24.15",
+    "pg": "^8.23.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "urijs": "^1.19.11"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.16",
+    "@types/js-cookie": "^3.0.6",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/urijs": "^1.19.26",
+    "autoprefixer": "^10.4.21",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
-    "tailwindcss": "^3.4.17",
-    "typescript": "^5",
     "postcss": "^8.5.6",
-    "autoprefixer": "^10.4.21",
-    "@tailwindcss/typography": "^0.5.16"
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
   }
 }
