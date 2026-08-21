@@ -32,5 +32,7 @@ export default withAuth(
 
 export const config = {
   // /rag 是阶段二迁入的 RAG 页面，先把守卫挂上
-  matcher: ["/admin/:path*", "/rag/:path*"],
+  // "/rag/:path*" 只匹配 /rag/xxx，**匹配不到 /rag 裸路径**（Next 的经典坑，
+  // 实测未登录访问 /rag 直接放行）。两条都列出来才盖全
+  matcher: ["/admin", "/admin/:path*", "/rag", "/rag/:path*"],
 };
