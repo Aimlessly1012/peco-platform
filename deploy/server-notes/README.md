@@ -57,3 +57,24 @@ platform 与 backend 共用 rag_coder_default 网络与同一个 Postgres
 
 **鉴权**：平台的 NextAuth 用 JWS(HS256) 签 cookie，后端用同一个密钥（`AUTH_JWT_SECRET`
 = 平台的 `NEXTAUTH_SECRET`）验签。两边密钥必须一致，否则登录后访问 /rag/api 一律 401。
+
+### nginx 容器名解析：必须用 resolver + 变量（2026-08-22 踩坑）
+
+`proxy_pass http://容器名:端口` 只在 nginx 启动/reload 那一刻解析一次并永久缓存。
+平台容器一重建 IP 就变（172.19.0.4 → .5），nginx 还往旧地址发 → **全站 502**，
+必须手动 `nginx -s reload` 才恢复——每次部署都要多这一步，且中间有一段服务不可用。
+
+修法（已落进 deploy/nginx-server.conf）：
+
+```nginx
+resolver 127.0.0.11 valid=10s ipv6=off;      # Docker 内置 DNS
+location / {
+    set $platform_upstream http://peco-platform-platform-1:3000;
+    proxy_pass $platform_upstream;            # 走变量才会按 valid 周期重新解析
+}
+```
+
+**变量式 proxy_pass 不会自动剥前缀**，`/rag/api/` 那条要显式 `rewrite ^/rag/api/(.*)$ /$1 break;`
+补回原先靠末尾斜杠实现的剥前缀。
+
+实测：重建容器后不 reload，公网直接 200。
