@@ -10,6 +10,7 @@
     "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "antd": "^5.29.3",
     "axios": "^1.19.0",
     "heitu": "^1.1.0",

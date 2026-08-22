@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Segmented } from "antd";
 import {
   BarChartComponent,
+  BarLineChartComponent,
   LineChartComponent,
   PieChartComponent,
 } from "heitu";
@@ -15,7 +16,7 @@ import {
 
 const PALETTE = ["#0e7a45", "#4a4842", "#8a8880", "#b8422f", "#d9d7cf"];
 
-type Kind = "line" | "bar" | "pie";
+type Kind = "line" | "bar" | "pie" | "barLine";
 
 const TREND = [
   { month: "1月", indexed: 4, chats: 12 },
@@ -31,6 +32,16 @@ const LANGS = [
   { lang: "Python", files: 312 },
   { lang: "Vue", files: 174 },
   { lang: "SQL", files: 63 },
+];
+
+/** 双轴：柱子走左轴（绝对量），折线走右轴（比例），量纲差一个数量级也能同框看。 */
+const THROUGHPUT = [
+  { month: "1月", files: 420, hitRate: 61 },
+  { month: "2月", files: 780, hitRate: 68 },
+  { month: "3月", files: 640, hitRate: 72 },
+  { month: "4月", files: 1180, hitRate: 76 },
+  { month: "5月", files: 960, hitRate: 81 },
+  { month: "6月", files: 1460, hitRate: 84 },
 ];
 
 const STAGES = [
@@ -94,6 +105,7 @@ export default function ChartsDemo() {
             { label: "折线图", value: "line" },
             { label: "柱状图", value: "bar" },
             { label: "饼图", value: "pie" },
+            { label: "双轴柱线图", value: "barLine" },
           ]}
         />
         <span className="text-[10px] tracking-wide text-faint">
@@ -127,6 +139,23 @@ export default function ChartsDemo() {
             data={LANGS}
             xField="lang"
             yField="files"
+            onClickItem={(item) => setPicked(JSON.stringify(item))}
+          />
+        )}
+        {width > 0 && kind === "barLine" && (
+          <BarLineChartComponent
+            key={`barLine-${width}`}
+            width={width}
+            {...common}
+            data={THROUGHPUT}
+            xField="month"
+            yFieldBar="files"
+            yFieldLine="hitRate"
+            barColor={PALETTE[0]}
+            lineColor={PALETTE[3]}
+            yLabelLeft="索引文件数"
+            yLabelRight="命中率 %"
+            smooth
             onClickItem={(item) => setPicked(JSON.stringify(item))}
           />
         )}

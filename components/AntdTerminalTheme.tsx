@@ -1,5 +1,10 @@
 "use client";
 
+// antd v5 官方只支持 React 16~18，本项目是 React 19：这个补丁把 Modal/message/
+// notification 等仍走旧渲染 API 的组件接到新的 createRoot 上。不引它不只是控制台
+// 报兼容警告——那几个组件在 React 19 下会真的不工作。必须在任何 antd 组件之前引入。
+import "@ant-design/v5-patch-for-react-19";
+
 import { ConfigProvider, theme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 

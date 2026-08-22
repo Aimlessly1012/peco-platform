@@ -31,9 +31,21 @@ const ChartsDemo = dynamic(() => import("./demos/ChartsDemo"), {
   loading: loading("LOADING CHART DEMO…"),
 });
 
+const CanvasDemo = dynamic(() => import("./demos/CanvasDemo"), {
+  ssr: false,
+  loading: loading("LOADING CANVAS DEMO…"),
+});
+
+const HooksDemo = dynamic(() => import("./demos/HooksDemo"), {
+  ssr: false,
+  loading: loading("LOADING HOOKS DEMO…"),
+});
+
 const TABS = [
   { key: "form", label: "FormRender" },
   { key: "charts", label: "Charts" },
+  { key: "canvas", label: "Canvas 引擎" },
+  { key: "hooks", label: "Hooks" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -115,12 +127,22 @@ export default function FrontPage() {
           <div className="flex items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
             <span className="block h-2 w-2 bg-accent" />
             <span className="text-[10px] tracking-label text-dim">
-              {tab === "form" ? "FORM RENDER · 配置即表单" : "CHARTS · canvas 自绘"}
+              {
+                {
+                  form: "FORM RENDER · 配置即表单",
+                  charts: "CHARTS · canvas 自绘 · 4 种图表",
+                  canvas: "CANVAS ENGINE · 图元 / 命中检测 / 补间动画",
+                  hooks: "HOOKS · 19 个，按类别归组",
+                }[tab]
+              }
             </span>
           </div>
           <div className="p-5">
             <AntdTerminalTheme>
-              {tab === "form" ? <FormRenderDemo /> : <ChartsDemo />}
+              {tab === "form" && <FormRenderDemo />}
+              {tab === "charts" && <ChartsDemo />}
+              {tab === "canvas" && <CanvasDemo />}
+              {tab === "hooks" && <HooksDemo />}
             </AntdTerminalTheme>
           </div>
         </section>
@@ -135,7 +157,16 @@ export default function FrontPage() {
             </li>
             <li>
               <span className="text-accent">·</span> charts 直接操作 canvas，没有引入 G2/ECharts
-              这类重型依赖，包体积可控。
+              这类重型依赖，包体积可控；四种图表含双轴柱线图。
+            </li>
+            <li>
+              <span className="text-accent">·</span> canvas 引擎是 charts 的底座：Stage 分层、
+              Rect / Circle / Line / Text / Group / Custom 六种图元、命中检测、拖拽与
+              Animate 补间，可脱离图表单独用。
+            </li>
+            <li>
+              <span className="text-accent">·</span> hooks 共 19 个，覆盖数据请求、DOM 观察、
+              存储、交互与工具五类，均可从 <code>heitu/hooks</code> 按需引入。
             </li>
             <li>
               <span className="text-accent">·</span> antd 是 peer 依赖；本页用 ConfigProvider
