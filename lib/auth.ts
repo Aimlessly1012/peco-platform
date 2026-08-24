@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from "jose";
+import { decodeSessionToken, encodeSessionToken } from "@/lib/jwt";
 import type { NextAuthOptions } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
 import { getByGithubId, upsertOnLogin, type UserRole, type UserStatus } from "./users";
@@ -54,27 +54,11 @@ export const authOptions: NextAuthOptions = {
    * 代价：token 内容可被解码查看（但不可篡改）。里面只有 githubId/role/status，
    * 不含密钥或隐私，可接受。
    */
+  // JWS 编解码抽在 lib/jwt.ts：middleware 的 withAuth 也要用同一实现，
+  // 只写在这里的话它拿默认 JWE 去解 JWS，/rag、/admin 会把已登录用户当未登录踢走
   jwt: {
-    async encode({ token, secret, maxAge }) {
-      const key = new TextEncoder().encode(String(secret));
-      const now = Math.floor(Date.now() / 1000);
-      return await new SignJWT({ ...token })
-        .setProtectedHeader({ alg: "HS256" })
-        .setIssuedAt(now)
-        .setExpirationTime(now + (maxAge ?? 30 * 24 * 60 * 60))
-        .sign(key);
-    },
-    async decode({ token, secret }) {
-      if (!token) return null;
-      try {
-        const key = new TextEncoder().encode(String(secret));
-        const { payload } = await jwtVerify(token, key, { algorithms: ["HS256"] });
-        return payload as Record<string, unknown>;
-      } catch {
-        // 过期或被篡改：当作未登录，让 NextAuth 走重新登录流程
-        return null;
-      }
-    },
+    encode: encodeSessionToken,
+    decode: decodeSessionToken,
   },
   pages: {
     signIn: "/login",

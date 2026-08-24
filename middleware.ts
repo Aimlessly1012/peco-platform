@@ -1,3 +1,4 @@
+import { decodeSessionToken } from "@/lib/jwt";
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
@@ -25,6 +26,10 @@ export default withAuth(
   },
   {
     pages: { signIn: "/login" },
+    // **必须显式传自定义 decode**：withAuth 内部默认按 JWE 解，而我们的会话
+    // token 是 JWS(HS256)（lib/jwt.ts，后端验签需要）。不传的话这里永远解出
+    // null——已登录用户访问 /rag、/admin 会被当成未登录踢回登录页（实测踩过）。
+    jwt: { decode: decodeSessionToken },
     // 没有 token 的一律先去登录页（withAuth 自动带 callbackUrl 回跳）
     callbacks: { authorized: ({ token }) => !!token },
   }
