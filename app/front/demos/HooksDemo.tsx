@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import { Button, Input, Space, Tag } from "antd";
+import { Button, Input, Space } from "antd";
 import {
   useAsyncFn,
   useCountDown,
@@ -13,7 +13,7 @@ import {
   usePrevious,
   useWindowSize,
 } from "heitu";
-import { HOOK_COUNT, HOOK_GROUPS } from "./hooks-reference";
+import { HOOK_COUNT, HOOK_GROUPS, type HookEntry } from "./hooks-reference";
 
 /**
  * hooks demo：每组挑一到两个做可交互演示，其余在速查表里列全。
@@ -129,14 +129,13 @@ function DomPanel() {
   const boxRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(boxRef);
   const { pixelRatio } = useDevicePixelRatio();
-  const win = useWindowSize();
   const [inViewRef, inView] = useInView();
   const [wide, setWide] = useState(false);
 
   return (
     <Panel
       title="尺寸与可见性"
-      hooks={["useElementSize", "useDevicePixelRatio", "useWindowSize", "useInView"]}
+      hooks={["useElementSize", "useDevicePixelRatio", "useInView"]}
     >
       <Space>
         <Button onClick={() => setWide((v) => !v)}>
@@ -151,7 +150,7 @@ function DomPanel() {
         被观察的容器 · 拖动窗口或点上面的按钮看数值变化
       </div>
       <Out>
-        element: {size.width} × {size.height} · window: {win.width} × {win.height} · DPR: {pixelRatio}
+        element: {size.width} × {size.height} · DPR: {pixelRatio}
       </Out>
 
       <div className="mt-1 h-[92px] overflow-y-auto border border-hair bg-shade p-3">
@@ -221,34 +220,108 @@ function PreviousPanel() {
   );
 }
 
-export default function HooksDemo() {
+function WindowPanel() {
+  const win = useWindowSize();
+  return (
+    <Panel title="窗口尺寸" hooks={["useWindowSize"]}>
+      <Out>
+        window: {win.width} × {win.height} · 拖动浏览器窗口看数值跟随
+      </Out>
+    </Panel>
+  );
+}
+
+export default function HooksDemo({ section }: { section: string }) {
   // 本组件由 /front 以 dynamic(ssr:false) 加载，整棵子树都不参与 SSR，
   // 所以 storage / window 这类 hook 不需要额外的 mounted 门禁
+  const group = HOOK_GROUPS.find((g) => g.key === section);
+
+  if (section === "all" || !group) {
+    return <ApiTable />;
+  }
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
-        <span>共 {HOOK_COUNT} 个 hook，下面挑了 9 个做可交互演示：</span>
-        <Tag color="green">数据请求</Tag>
-        <Tag>DOM 观察</Tag>
-        <Tag>存储</Tag>
-        <Tag>交互</Tag>
-        <Tag>工具</Tag>
-      </div>
+    <div className="flex flex-col gap-4">
+      <p className="text-[11px] leading-relaxed text-muted">
+        {group.hint} · 本组共 {group.items.length} 个，其中带 DEMO 标记的在下面可以直接操作。
+      </p>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <AsyncPanel />
-        <PollingPanel />
-        <DomPanel />
-        <StoragePanel />
-        <CountDownPanel />
-        <PreviousPanel />
+        {section === "async" && (
+          <>
+            <AsyncPanel />
+            <PollingPanel />
+          </>
+        )}
+        {section === "dom" && <DomPanel />}
+        {section === "storage" && <StoragePanel />}
+        {section === "interaction" && <CountDownPanel />}
+        {section === "util" && (
+          <>
+            <PreviousPanel />
+            <WindowPanel />
+          </>
+        )}
       </div>
 
       <section className="border border-line bg-panel">
         <div className="flex items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
           <span className="block h-2 w-2 bg-accent" />
-          <span className="text-[10px] tracking-label text-dim">API 速查 · {HOOK_COUNT}</span>
+          <span className="text-[10px] tracking-label text-dim">
+            {group.label.toUpperCase()} · {group.items.length} 个 API
+          </span>
         </div>
+        <HookRows items={group.items} />
+      </section>
+    </div>
+  );
+}
+
+/** 一组 hook 的签名表格（组内视图与「全部 API」共用）。 */
+function HookRows({ items }: { items: HookEntry[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[680px] text-[12px]">
+        <thead className="border-b border-line bg-shade text-left text-[10px] tracking-label text-dim">
+          <tr>
+            <th className="px-4 py-2.5 font-normal">HOOK</th>
+            <th className="px-4 py-2.5 font-normal">签名</th>
+            <th className="px-4 py-2.5 font-normal">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((h) => (
+            <tr key={h.name} className="border-b border-hair align-top last:border-b-0">
+              <td className="whitespace-nowrap px-4 py-3">
+                <code className="text-[11.5px] text-ink">{h.name}</code>
+                {h.demo && (
+                  <span className="ml-1.5 border border-accent/40 px-1 py-px text-[9px] tracking-wide text-accent">
+                    DEMO
+                  </span>
+                )}
+              </td>
+              <td className="px-4 py-3">
+                <code className="break-all text-[10.5px] leading-relaxed text-ink2">
+                  {h.signature}
+                </code>
+              </td>
+              <td className="px-4 py-3 leading-relaxed text-muted">{h.desc}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 「全部 API」一节：19 个按组铺开。 */
+function ApiTable() {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-[11px] leading-relaxed text-muted">
+        共 {HOOK_COUNT} 个 hook，签名取自安装版本的 .d.ts。带 DEMO 标记的可在左侧对应分组里直接操作。
+      </p>
+      <div className="border border-line">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-[12px]">
             <thead className="border-b border-line bg-shade text-left text-[10px] tracking-label text-dim">
@@ -260,7 +333,6 @@ export default function HooksDemo() {
             </thead>
             <tbody>
               {HOOK_GROUPS.map((g) => (
-                // key 要挂在 map 直接返回的那个元素上。这里返回的是片段，
                 // 匿名 <> 不接受 key，必须写成 <Fragment key=...>
                 <Fragment key={g.key}>
                   <tr className="border-b border-hair bg-shade/60">
@@ -294,7 +366,7 @@ export default function HooksDemo() {
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
     </div>
   );
 }

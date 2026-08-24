@@ -3,11 +3,15 @@
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import AntdTerminalTheme from "@/components/AntdTerminalTheme";
+import { TABS, tabByKey, type TabKey } from "./nav";
 
 /**
- * heitu 组件库展示（M12 P6）。
+ * heitu 组件库展示（M12 P6 + 信息架构改造）。
  *
- * demo 全部 ssr:false：charts 是 canvas 自绘、antd 组件也大量依赖浏览器 API，
+ * 两级导航：顶部 tab 分大类，左侧栏是当前 tab 的子项——原先子项塞在内容区里
+ * （Charts 用 Segmented、Hooks 用 chips），和大类挤在同一块，层级看不出来。
+ *
+ * demo 全部 ssr:false：charts / canvas 是 canvas 自绘、antd 组件也大量依赖浏览器 API，
  * 关掉 SSR 既省掉样式闪烁，也不用引 @ant-design/nextjs-registry 那套 SSR 样式提取。
  */
 
@@ -41,23 +45,23 @@ const HooksDemo = dynamic(() => import("./demos/HooksDemo"), {
   loading: loading("LOADING HOOKS DEMO…"),
 });
 
-const TABS = [
-  { key: "form", label: "FormRender" },
-  { key: "charts", label: "Charts" },
-  { key: "canvas", label: "Canvas 引擎" },
-  { key: "hooks", label: "Hooks" },
-] as const;
-
-type TabKey = (typeof TABS)[number]["key"];
-
 const INSTALL = "npm install heitu antd";
 
 export default function FrontPage() {
   const [tab, setTab] = useState<TabKey>("form");
+  const current = tabByKey(tab);
+  const [section, setSection] = useState<string>(current.sections[0].key);
+
+  /** 切大类时侧栏整体换掉，并默认落在第一项。 */
+  const switchTab = (key: TabKey) => {
+    setTab(key);
+    setSection(tabByKey(key).sections[0].key);
+  };
 
   return (
     <div className="flex min-h-0 flex-1">
-      <aside className="hidden w-[212px] flex-none flex-col gap-7 overflow-y-auto border-r border-line bg-canvas px-5 py-6 md:flex">
+      {/* 左栏：品牌信息 + 当前 tab 的子项导航 */}
+      <aside className="hidden w-[212px] flex-none flex-col gap-6 overflow-y-auto border-r border-line bg-canvas px-5 py-6 md:flex">
         <div className="flex flex-col gap-1.5">
           <div className="text-[10px] tracking-label text-dim">HEITU</div>
           <div className="text-[26px] font-semibold leading-none">v1.1.0</div>
@@ -71,18 +75,42 @@ export default function FrontPage() {
           </code>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-[10px] tracking-label text-dim">ENTRIES</div>
-          <ul className="flex flex-col gap-1 text-[11px] text-muted">
-            {["heitu", "heitu/hooks", "heitu/components", "heitu/charts", "heitu/canvas"].map(
-              (e) => (
-                <li key={e} className="break-all">
-                  {e}
-                </li>
-              )
-            )}
-          </ul>
-        </div>
+        <nav className="flex flex-col gap-1.5" aria-label={`${current.label} 子项`}>
+          <div className="text-[10px] tracking-label text-dim">
+            {current.label.toUpperCase()}
+          </div>
+          <div className="flex flex-col">
+            {current.sections.map((s) => {
+              const on = s.key === section;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setSection(s.key)}
+                  aria-current={on ? "true" : undefined}
+                  className={`border-l-2 px-3 py-2 text-left transition-colors ${
+                    on
+                      ? "border-accent bg-panel"
+                      : "border-transparent hover:bg-panel/60"
+                  }`}
+                >
+                  <span
+                    className={`block text-[12px] ${on ? "font-medium text-ink" : "text-muted"}`}
+                  >
+                    {s.label}
+                  </span>
+                  <span
+                    className={`mt-0.5 block text-[10px] leading-relaxed ${
+                      on ? "text-dim" : "text-faint"
+                    }`}
+                  >
+                    {s.hint}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
 
         <div className="mt-auto text-[11px] leading-relaxed text-faint">
           antd 经 ConfigProvider
@@ -91,6 +119,7 @@ export default function FrontPage() {
         </div>
       </aside>
 
+      {/* 主区 */}
       <div className="flex min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto px-7 py-6">
         <div className="flex items-baseline gap-3">
           <h1 className="text-[22px] font-semibold">heitu 组件库</h1>
@@ -100,19 +129,20 @@ export default function FrontPage() {
         </div>
 
         <p className="max-w-3xl text-[12px] leading-relaxed text-muted">
-          自研 React 工具库：JSON 配置驱动的表单渲染器、canvas 自绘图表、以及一组通用 hooks。
+          自研 React 工具库：JSON 配置驱动的表单渲染器、canvas 自绘图表与引擎、以及一组通用 hooks。
           下面的 demo 都是真实组件，可以直接操作。antd 的主色、圆角与字体已通过 ConfigProvider
           对齐本站令牌——同一套组件，换了皮就不违和。
         </p>
 
-        <div className="flex gap-0 border-b border-line" role="tablist">
+        {/* 大类 */}
+        <div className="flex gap-0 overflow-x-auto border-b border-line" role="tablist">
           {TABS.map((t) => (
             <button
               key={t.key}
               role="tab"
               aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={`-mb-px border-b-2 px-4 py-2 text-[11.5px] tracking-wide ${
+              onClick={() => switchTab(t.key)}
+              className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2 text-[11.5px] tracking-wide ${
                 tab === t.key
                   ? "border-accent font-medium text-ink"
                   : "border-transparent text-muted hover:text-ink"
@@ -123,26 +153,41 @@ export default function FrontPage() {
           ))}
         </div>
 
+        {/* 窄屏没有侧栏，子项退化成横向 chips */}
+        <div className="flex flex-wrap gap-1.5 md:hidden">
+          {current.sections.map((s) => {
+            const on = s.key === section;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setSection(s.key)}
+                className={`border px-2.5 py-1 text-[11px] ${
+                  on
+                    ? "border-accent bg-accent/[.08] text-accent"
+                    : "border-line text-muted hover:border-ink hover:text-ink"
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+
         <section className="border border-line bg-panel">
-          <div className="flex items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
             <span className="block h-2 w-2 bg-accent" />
-            <span className="text-[10px] tracking-label text-dim">
-              {
-                {
-                  form: "FORM RENDER · 配置即表单",
-                  charts: "CHARTS · canvas 自绘 · 4 种图表",
-                  canvas: "CANVAS ENGINE · 图元 / 命中检测 / 补间动画",
-                  hooks: "HOOKS · 19 个，按类别归组",
-                }[tab]
-              }
+            <span className="text-[10px] tracking-label text-dim">{current.caption}</span>
+            <span className="ml-auto text-[10px] tracking-wide text-faint">
+              {current.sections.find((s) => s.key === section)?.hint}
             </span>
           </div>
           <div className="p-5">
             <AntdTerminalTheme>
-              {tab === "form" && <FormRenderDemo />}
-              {tab === "charts" && <ChartsDemo />}
-              {tab === "canvas" && <CanvasDemo />}
-              {tab === "hooks" && <HooksDemo />}
+              {tab === "form" && <FormRenderDemo section={section} />}
+              {tab === "charts" && <ChartsDemo section={section} />}
+              {tab === "canvas" && <CanvasDemo section={section} />}
+              {tab === "hooks" && <HooksDemo section={section} />}
             </AntdTerminalTheme>
           </div>
         </section>
@@ -167,10 +212,6 @@ export default function FrontPage() {
             <li>
               <span className="text-accent">·</span> hooks 共 19 个，覆盖数据请求、DOM 观察、
               存储、交互与工具五类，均可从 <code>heitu/hooks</code> 按需引入。
-            </li>
-            <li>
-              <span className="text-accent">·</span> antd 是 peer 依赖；本页用 ConfigProvider
-              注入终端风 token（主色 #0e7a45、圆角 0、IBM Plex Mono）。
             </li>
           </ul>
         </section>

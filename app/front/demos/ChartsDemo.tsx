@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Segmented } from "antd";
 import {
   BarChartComponent,
   BarLineChartComponent,
@@ -16,6 +15,7 @@ import {
 
 const PALETTE = ["#0e7a45", "#4a4842", "#8a8880", "#b8422f", "#d9d7cf"];
 
+/** 由 /front 侧栏传入，取值见 nav.ts 的 charts.sections。 */
 type Kind = "line" | "bar" | "pie" | "barLine";
 
 const TREND = [
@@ -74,10 +74,12 @@ function useReadyWidth() {
   return { ref, width };
 }
 
-export default function ChartsDemo() {
-  const [kind, setKind] = useState<Kind>("line");
+export default function ChartsDemo({ section }: { section: string }) {
+  const kind = section as Kind;
   const { ref: boxRef, width } = useReadyWidth();
-  const [picked, setPicked] = useState<string>("");
+  // 选中信息连同它属于哪张图一起存：换图表时自然失效，不必用 effect 去清
+  const [picked, setPicked] = useState<{ kind: string; text: string } | null>(null);
+  const pickedText = picked?.kind === section ? picked.text : "";
 
   const common = useMemo(
     () => ({
@@ -94,23 +96,8 @@ export default function ChartsDemo() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Segmented
-          value={kind}
-          onChange={(v) => {
-            setKind(v as Kind);
-            setPicked("");
-          }}
-          options={[
-            { label: "折线图", value: "line" },
-            { label: "柱状图", value: "bar" },
-            { label: "饼图", value: "pie" },
-            { label: "双轴柱线图", value: "barLine" },
-          ]}
-        />
-        <span className="text-[10px] tracking-wide text-faint">
-          点击图元查看数据 · canvas 渲染
-        </span>
+      <div className="text-[10px] tracking-wide text-faint">
+        点击图元查看数据 · canvas 渲染，无 G2/ECharts 依赖
       </div>
 
       <div ref={boxRef} className="border border-line bg-panel p-3">
@@ -128,7 +115,7 @@ export default function ChartsDemo() {
             xField="month"
             yField={["indexed", "chats"]}
             smooth
-            onClickItem={(item) => setPicked(JSON.stringify(item))}
+            onClickItem={(item) => setPicked({ kind: section, text: JSON.stringify(item) })}
           />
         )}
         {width > 0 && kind === "bar" && (
@@ -139,7 +126,7 @@ export default function ChartsDemo() {
             data={LANGS}
             xField="lang"
             yField="files"
-            onClickItem={(item) => setPicked(JSON.stringify(item))}
+            onClickItem={(item) => setPicked({ kind: section, text: JSON.stringify(item) })}
           />
         )}
         {width > 0 && kind === "barLine" && (
@@ -156,7 +143,7 @@ export default function ChartsDemo() {
             yLabelLeft="索引文件数"
             yLabelRight="命中率 %"
             smooth
-            onClickItem={(item) => setPicked(JSON.stringify(item))}
+            onClickItem={(item) => setPicked({ kind: section, text: JSON.stringify(item) })}
           />
         )}
         {width > 0 && kind === "pie" && (
@@ -167,13 +154,13 @@ export default function ChartsDemo() {
             data={STAGES}
             angleField="value"
             colorField="stage"
-            onClickItem={(item) => setPicked(JSON.stringify(item))}
+            onClickItem={(item) => setPicked({ kind: section, text: JSON.stringify(item) })}
           />
         )}
       </div>
 
       <div className="border border-line bg-shade px-3 py-2 text-[11px] leading-relaxed text-ink2">
-        {picked ? `选中：${picked}` : "尚未选中任何图元"}
+        {pickedText ? `选中：${pickedText}` : "尚未选中任何图元"}
       </div>
     </div>
   );
