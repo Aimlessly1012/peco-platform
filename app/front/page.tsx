@@ -48,14 +48,21 @@ const HooksDemo = dynamic(() => import("./demos/HooksDemo"), {
 const INSTALL = "npm install heitu antd";
 
 export default function FrontPage() {
-  const [tab, setTab] = useState<TabKey>("form");
-  const current = tabByKey(tab);
-  const [section, setSection] = useState<string>(current.sections[0].key);
+  /** null = 停在第一层（大类列表）；选中某个大类后才进第二层。 */
+  const [tab, setTab] = useState<TabKey | null>(null);
+  const [section, setSection] = useState<string>("");
+  const current = tab ? tabByKey(tab) : null;
 
-  /** 切大类时侧栏整体换掉，并默认落在第一项。 */
-  const switchTab = (key: TabKey) => {
+  /** 进入某个大类：侧栏换成它的子项，内容默认落在第一项。 */
+  const enterTab = (key: TabKey) => {
     setTab(key);
     setSection(tabByKey(key).sections[0].key);
+  };
+
+  /** 返回第一层。 */
+  const goRoot = () => {
+    setTab(null);
+    setSection("");
   };
 
   return (
@@ -75,42 +82,74 @@ export default function FrontPage() {
           </code>
         </div>
 
-        <nav className="flex flex-col gap-1.5" aria-label={`${current.label} 子项`}>
-          <div className="text-[10px] tracking-label text-dim">
-            {current.label.toUpperCase()}
-          </div>
-          <div className="flex flex-col">
-            {current.sections.map((s) => {
-              const on = s.key === section;
-              return (
+        {/* 逐层钻取：第一层只列大类，进去后换成子项并给出返回入口 */}
+        {current === null ? (
+          <nav className="flex flex-col gap-1.5" aria-label="模块">
+            <div className="text-[10px] tracking-label text-dim">MODULES</div>
+            <div className="flex flex-col">
+              {TABS.map((t2) => (
                 <button
-                  key={s.key}
+                  key={t2.key}
                   type="button"
-                  onClick={() => setSection(s.key)}
-                  aria-current={on ? "true" : undefined}
-                  className={`border-l-2 px-3 py-2 text-left transition-colors ${
-                    on
-                      ? "border-accent bg-panel"
-                      : "border-transparent hover:bg-panel/60"
-                  }`}
+                  onClick={() => enterTab(t2.key)}
+                  className="flex items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-panel/60"
                 >
-                  <span
-                    className={`block text-[12px] ${on ? "font-medium text-ink" : "text-muted"}`}
-                  >
-                    {s.label}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12px] text-ink">{t2.label}</span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-faint">
+                      {t2.sections.length} 项
+                    </span>
                   </span>
-                  <span
-                    className={`mt-0.5 block text-[10px] leading-relaxed ${
-                      on ? "text-dim" : "text-faint"
+                  <span className="text-[11px] text-faint">›</span>
+                </button>
+              ))}
+            </div>
+          </nav>
+        ) : (
+          <nav className="flex flex-col gap-1.5" aria-label={`${current.label} 子项`}>
+            <button
+              type="button"
+              onClick={goRoot}
+              className="flex items-center gap-1.5 self-start text-[11px] text-muted transition-colors hover:text-ink"
+            >
+              <span aria-hidden>←</span> 返回
+            </button>
+            <div className="text-[10px] tracking-label text-dim">
+              {current.label.toUpperCase()}
+            </div>
+            <div className="flex flex-col">
+              {current.sections.map((s) => {
+                const on = s.key === section;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setSection(s.key)}
+                    aria-current={on ? "true" : undefined}
+                    className={`border-l-2 px-3 py-2 text-left transition-colors ${
+                      on
+                        ? "border-accent bg-panel"
+                        : "border-transparent hover:bg-panel/60"
                     }`}
                   >
-                    {s.hint}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </nav>
+                    <span
+                      className={`block text-[12px] ${on ? "font-medium text-ink" : "text-muted"}`}
+                    >
+                      {s.label}
+                    </span>
+                    <span
+                      className={`mt-0.5 block text-[10px] leading-relaxed ${
+                        on ? "text-dim" : "text-faint"
+                      }`}
+                    >
+                      {s.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        )}
 
         <div className="mt-auto text-[11px] leading-relaxed text-faint">
           antd 经 ConfigProvider
@@ -134,63 +173,93 @@ export default function FrontPage() {
           对齐本站令牌——同一套组件，换了皮就不违和。
         </p>
 
-        {/* 大类 */}
-        <div className="flex gap-0 overflow-x-auto border-b border-line" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => switchTab(t.key)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2 text-[11.5px] tracking-wide ${
-                tab === t.key
-                  ? "border-accent font-medium text-ink"
-                  : "border-transparent text-muted hover:text-ink"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 窄屏没有侧栏，子项退化成横向 chips */}
-        <div className="flex flex-wrap gap-1.5 md:hidden">
-          {current.sections.map((s) => {
-            const on = s.key === section;
-            return (
+        {current === null ? (
+          /* 第一层：大类概览。既是导航入口也是介绍，比空白页有用 */
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {TABS.map((t2) => (
               <button
-                key={s.key}
+                key={t2.key}
                 type="button"
-                onClick={() => setSection(s.key)}
-                className={`border px-2.5 py-1 text-[11px] ${
-                  on
-                    ? "border-accent bg-accent/[.08] text-accent"
-                    : "border-line text-muted hover:border-ink hover:text-ink"
-                }`}
+                onClick={() => enterTab(t2.key)}
+                className="border border-line bg-panel p-4 text-left transition-colors hover:border-ink"
               >
-                {s.label}
+                <div className="flex items-baseline gap-2">
+                  <span className="block h-2 w-2 bg-accent" />
+                  <span className="text-[13px] font-medium">{t2.label}</span>
+                  <span className="ml-auto text-[10px] tracking-wide text-faint">
+                    {t2.sections.length} 项 →
+                  </span>
+                </div>
+                <ul className="mt-2.5 flex flex-col gap-1">
+                  {t2.sections.map((s) => (
+                    <li key={s.key} className="text-[11px] leading-relaxed text-muted">
+                      <span className="text-faint">·</span> {s.label}
+                      <span className="ml-1.5 text-faint">{s.hint}</span>
+                    </li>
+                  ))}
+                </ul>
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* 面包屑：第二层里始终看得见自己在哪、怎么回去 */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={goRoot}
+                className="text-muted transition-colors hover:text-ink"
+              >
+                ← 全部模块
+              </button>
+              <span className="text-faint">/</span>
+              <span className="text-ink">{current.label}</span>
+              <span className="text-faint">/</span>
+              <span className="text-dim">
+                {current.sections.find((s) => s.key === section)?.label}
+              </span>
+            </div>
 
-        <section className="border border-line bg-panel">
-          <div className="flex flex-wrap items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
-            <span className="block h-2 w-2 bg-accent" />
-            <span className="text-[10px] tracking-label text-dim">{current.caption}</span>
-            <span className="ml-auto text-[10px] tracking-wide text-faint">
-              {current.sections.find((s) => s.key === section)?.hint}
-            </span>
-          </div>
-          <div className="p-5">
-            <AntdTerminalTheme>
-              {tab === "form" && <FormRenderDemo section={section} />}
-              {tab === "charts" && <ChartsDemo section={section} />}
-              {tab === "canvas" && <CanvasDemo section={section} />}
-              {tab === "hooks" && <HooksDemo section={section} />}
-            </AntdTerminalTheme>
-          </div>
-        </section>
+            {/* 窄屏没有侧栏，子项退化成横向 chips */}
+            <div className="flex flex-wrap gap-1.5 md:hidden">
+              {current.sections.map((s) => {
+                const on = s.key === section;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setSection(s.key)}
+                    className={`border px-2.5 py-1 text-[11px] ${
+                      on
+                        ? "border-accent bg-accent/[.08] text-accent"
+                        : "border-line text-muted hover:border-ink hover:text-ink"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <section className="border border-line bg-panel">
+              <div className="flex flex-wrap items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
+                <span className="block h-2 w-2 bg-accent" />
+                <span className="text-[10px] tracking-label text-dim">{current.caption}</span>
+                <span className="ml-auto text-[10px] tracking-wide text-faint">
+                  {current.sections.find((s) => s.key === section)?.hint}
+                </span>
+              </div>
+              <div className="p-5">
+                <AntdTerminalTheme>
+                  {tab === "form" && <FormRenderDemo section={section} />}
+                  {tab === "charts" && <ChartsDemo section={section} />}
+                  {tab === "canvas" && <CanvasDemo section={section} />}
+                  {tab === "hooks" && <HooksDemo section={section} />}
+                </AntdTerminalTheme>
+              </div>
+            </section>
+          </>
+        )}
 
         <section className="border border-line bg-panel p-4">
           <div className="text-[10px] tracking-label text-dim">NOTES</div>
