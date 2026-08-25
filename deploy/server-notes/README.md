@@ -79,12 +79,17 @@ location / {
 
 实测：重建容器后不 reload，公网直接 200。
 
-## 域名与 HTTPS（2026-08-25 上线）
+## 域名与 HTTPS（2026-08-25 上线，同日主域切换 heitu.wang → baotao.wang）
 
-- 域名 `heitu.wang`，DNS 在腾讯云 DNSPod：`@` 与 `www` 两条 A 记录 → 43.167.170.20。
-  服务器是腾讯云**东京**（ap-tokyo），境外机器，无需 ICP 备案。
-- 入口统一收敛到 `https://heitu.wang`：80 端口只留 ACME 验证路径，其余（含 IP 直访、www）
-  一律 301 过去。MCP 接入地址随之变为 `https://heitu.wang/rag/api/mcp`。
+- 主域 `baotao.wang`：**阿里云（万网）注册，解析也在阿里云**——`@` 与 `www` 两条
+  A 记录 → 43.167.170.20。教训：域名在哪家注册，解析就加在哪家的 DNS 控制台
+  （NS 不迁的话在别家加记录不生效）；国内后缀（.wang）实名认证通过前是
+  clientHold，全球 DNS 连 NS 委派都查不到，什么都别排查，先等认证。
+  服务器是腾讯云**东京**（ap-tokyo），境外机器，无需 ICP 备案，无公网 IPv6（勿加 AAAA）。
+- 旧域 `heitu.wang`（腾讯 DNSPod）整站 301 → baotao.wang；其证书 2026-11 到期，
+  若域名不续注册，到期后把 nginx 里 heitu 的 443 块和 80 server_name 里的两个名字删掉即可。
+- 入口统一收敛到 `https://baotao.wang`：80 只留 ACME 验证路径，其余（http、www、
+  旧域、IP 直访）一律 301。MCP 接入地址：`https://baotao.wang/rag/api/mcp`。
 - 证书：宿主机 certbot 2.9.0（apt），`certbot certonly --webroot -w /var/www/certbot`。
   `/etc/letsencrypt` 与 `/var/www/certbot` 以只读挂载进 nginx 容器（见 server.yml）。
   续期靠 apt 自带的 certbot.timer（每日两跑）；**续期后容器不会自己换证书句柄**，
@@ -93,4 +98,4 @@ location / {
   改名为 `__Secure-next-auth.session-token`（http 时代叫 `next-auth.session-token`）。
   后端验签读哪个名字由 RAG `.env` 的 `PLATFORM_COOKIE_NAME` 决定——两边必须同步换，
   只换一边的症状是：平台登录正常、`/rag` 页面能进，但所有 `/rag/api/*` 全 401。
-- GitHub OAuth App 的 Authorization callback URL 必须登记 `https://heitu.wang/api/auth/callback/github`。
+- GitHub OAuth App 的 Authorization callback URL 必须登记 `https://baotao.wang/api/auth/callback/github`。
