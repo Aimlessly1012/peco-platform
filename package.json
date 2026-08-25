@@ -13,7 +13,7 @@
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "antd": "^5.29.3",
     "axios": "^1.19.0",
-    "heitu": "^1.1.0",
+    "heitu": "^1.1.1",
     "js-cookie": "^3.0.8",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",

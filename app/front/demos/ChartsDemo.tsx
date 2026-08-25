@@ -85,10 +85,8 @@ export default function ChartsDemo({ section }: { section: string }) {
     () => ({
       height: 280,
       colors: PALETTE,
-      // 关掉入场动画：heitu 的揭幕遮罩（Rect fillStyle '#0F172A'）在动画收尾时
-      // done 回调没能把它清零，会永久留一条黑边压在图表上——作品集里这是硬伤。
-      // 组件库修好后可以打开。
-      animation: false as const,
+      // 1.1.1 修掉了揭幕遮罩残留（1.1.0 时这里只能 animation: false），开回入场动画
+      animation: { duration: 600 },
       style: { width: "100%" },
     }),
     []

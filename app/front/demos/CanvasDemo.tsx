@@ -13,8 +13,8 @@ import { Animate, Circle, Custom, Group, Line, Rect, Stage, Text } from "heitu";
  * 三个已知坑，都在这里绕开了：
  * 1. Stage 在 buildContentDOM 时读容器尺寸定 canvas 大小，宽度为 0 就画不出东西——
  *    所以沿用 ChartsDemo 的做法，等容器宽度就绪再挂载。
- * 2. Animate 的 cfg.done / cfg.aborted 在实现里从未被调用（类型声明里有，代码里没有），
- *    所以收尾动作不能挂在 done 上，这里改用 during 的 percent 判断。
+ * 2. Animate 的 done/aborted 自 1.1.1 起才真正触发（1.1.0 只有类型声明），
+ *    本页收尾动作挂在 done 上——升级前的写法是 during 里判 percent。
  * 3. 拖拽在运行时是读 `node.draggable`（鸭子类型），但 Rect/Circle/Line/Text/Custom
  *    这些类的 .d.ts 都没声明该属性——只有 ChildType 接口和 Group 类有，所以要断言。
  */
@@ -225,17 +225,17 @@ export default function CanvasDemo({ section }: { section: string }) {
         const anim = new Animate(from, to, {
           duration: 720,
           easing: "cubicOut",
-          during: (percent, state) => {
+          during: (_percent, state) => {
             ball.x = Number(state.x);
             ball.radius = Number(state.radius);
             stage.batchDraw(stage);
-            // done 回调不可用：自己在最后一帧收尾，把半径归位并解锁按钮
-            if (percent === 1) {
-              ball.radius = 30;
-              stage.batchDraw(stage);
-              setPlaying(false);
-              setInfo({ section: "animate", text: `到位：x = ${Math.round(ball.x)}，半径已归位 30` });
-            }
+          },
+          // 1.1.1 起 done 真的会触发（1.1.0 只有类型没有实现），收尾不再挤在 during 里
+          done: () => {
+            ball.radius = 30;
+            stage.batchDraw(stage);
+            setPlaying(false);
+            setInfo({ section: "animate", text: `到位：x = ${Math.round(ball.x)}，半径已归位 30` });
           },
         });
         anim.start();
@@ -262,8 +262,6 @@ export default function CanvasDemo({ section }: { section: string }) {
     if (playing || !pulseRef.current) return;
     setPlaying(true);
     pulseRef.current();
-    // Animate 没有 done/aborted 回调，加一道超时兜底，别让按钮永久卡住
-    window.setTimeout(() => setPlaying(false), 1200);
   }, [playing]);
 
   return (

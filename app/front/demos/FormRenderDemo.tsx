@@ -27,7 +27,8 @@ const fetchCities = async (form?: unknown, watched?: unknown[]) => {
 };
 
 const BASIC: (IConfigItem | IConfigItem[])[] = [
-  { divider: true, label: "基本信息" },
+  // titlePlacement 自 1.1.1 起按 antd 大版本自动适配（v5 转 orientation），可以放心用
+  { divider: true, label: "基本信息", titlePlacement: "left" },
   [
     {
       type: "Input",

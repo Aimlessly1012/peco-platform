@@ -71,7 +71,7 @@ export default function FrontPage() {
       <aside className="hidden w-[212px] flex-none flex-col gap-6 overflow-y-auto border-r border-line bg-canvas px-5 py-6 md:flex">
         <div className="flex flex-col gap-1.5">
           <div className="text-[10px] tracking-label text-dim">HEITU</div>
-          <div className="text-[26px] font-semibold leading-none">v1.1.0</div>
+          <div className="text-[26px] font-semibold leading-none">v1.1.1</div>
           <div className="text-[11px] text-muted">npm 已发布</div>
         </div>
 
