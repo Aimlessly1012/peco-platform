@@ -14,7 +14,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "作品集", active: (p) => p === "/" },
+  { href: "/", label: "首页", active: (p) => p === "/" },
   { href: "/front", label: "组件库", active: (p) => p.startsWith("/front") },
   { href: "/rag", label: "RAG Coder", active: (p) => p.startsWith("/rag") },
   { href: "/admin", label: "审核", active: (p) => p.startsWith("/admin"), adminOnly: true },

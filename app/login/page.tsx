@@ -58,7 +58,7 @@ function LoginInner() {
             </button>
 
             <p className="text-[10px] leading-relaxed text-faint">
-              作品集首页与组件库展示无需登录，可直接浏览。
+              首页与组件库展示无需登录，可直接浏览。
             </p>
           </div>
         </div>

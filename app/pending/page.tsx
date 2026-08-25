@@ -78,7 +78,7 @@ export default function PendingPage() {
               href="/"
               className="border border-line px-3 py-2 text-[11px] tracking-wide text-muted hover:border-ink hover:text-ink"
             >
-              ← 回作品集
+              ← 回首页
             </Link>
             <button
               type="button"
