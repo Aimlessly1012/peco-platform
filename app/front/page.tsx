@@ -45,6 +45,13 @@ const HooksDemo = dynamic(() => import("./demos/HooksDemo"), {
   loading: loading("LOADING HOOKS DEMO…"),
 });
 
+const AI_SKILLS = [
+  { name: "heitu-formrender", desc: "JSON 驱动表单：配置、联动、异步选项、自定义控件" },
+  { name: "heitu-charts", desc: "四种图表 props 速查 + 宽度陷阱、动画遮罩等实机坑位" },
+  { name: "heitu-canvas", desc: "Stage/图元/事件/Animate 全流程与 1.1.x 版本差异" },
+  { name: "heitu-hooks", desc: "19 个 hooks 签名速查与容易踩的语义细节" },
+];
+
 const INSTALL = "npm install heitu antd";
 
 export default function FrontPage() {
@@ -175,32 +182,62 @@ export default function FrontPage() {
 
         {current === null ? (
           /* 第一层：大类概览。既是导航入口也是介绍，比空白页有用 */
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {TABS.map((t2) => (
-              <button
-                key={t2.key}
-                type="button"
-                onClick={() => enterTab(t2.key)}
-                className="border border-line bg-panel p-4 text-left transition-colors hover:border-ink"
-              >
-                <div className="flex items-baseline gap-2">
-                  <span className="block h-2 w-2 bg-accent" />
-                  <span className="text-[13px] font-medium">{t2.label}</span>
-                  <span className="ml-auto text-[10px] tracking-wide text-faint">
-                    {t2.sections.length} 项 →
-                  </span>
-                </div>
-                <ul className="mt-2.5 flex flex-col gap-1">
-                  {t2.sections.map((s) => (
-                    <li key={s.key} className="text-[11px] leading-relaxed text-muted">
-                      <span className="text-faint">·</span> {s.label}
-                      <span className="ml-1.5 text-faint">{s.hint}</span>
-                    </li>
-                  ))}
-                </ul>
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {TABS.map((t2) => (
+                <button
+                  key={t2.key}
+                  type="button"
+                  onClick={() => enterTab(t2.key)}
+                  className="border border-line bg-panel p-4 text-left transition-colors hover:border-ink"
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="block h-2 w-2 bg-accent" />
+                    <span className="text-[13px] font-medium">{t2.label}</span>
+                    <span className="ml-auto text-[10px] tracking-wide text-faint">
+                      {t2.sections.length} 项 →
+                    </span>
+                  </div>
+                  <ul className="mt-2.5 flex flex-col gap-1">
+                    {t2.sections.map((s) => (
+                      <li key={s.key} className="text-[11px] leading-relaxed text-muted">
+                        <span className="text-faint">·</span> {s.label}
+                        <span className="ml-1.5 text-faint">{s.hint}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+              ))}
+            </div>
+
+            {/* npm 包内置的 AI skill 文档：装包即让 Claude Code 学会正确用法，作品集亮点 */}
+            <section className="border border-line bg-panel p-4">
+              <div className="flex items-baseline gap-2">
+                <span className="block h-2 w-2 bg-accent" />
+                <span className="text-[10px] tracking-label text-dim">AI SKILLS</span>
+                <span className="ml-auto text-[10px] tracking-wide text-faint">
+                  npm 包内置 · 安装即生效
+                </span>
+              </div>
+              <p className="mt-2.5 text-[11px] leading-relaxed text-muted">
+                包里自带 <code>.claude/skills/</code> 四份技能文档——
+                <code>npm install heitu</code> 之后，Claude Code 等 AI 编码工具无需翻源码，
+                直接掌握各组件的正确入口、参数与实机坑位：
+              </p>
+              <ul className="mt-2.5 grid grid-cols-1 gap-1.5 text-[11px] leading-relaxed text-muted sm:grid-cols-2">
+                {AI_SKILLS.map((s) => (
+                  <li key={s.name}>
+                    <code className="text-accent">{s.name}</code>
+                    <span className="ml-1.5">{s.desc}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2.5 text-[10.5px] leading-relaxed text-faint">
+                内容按 TDD 方式维护：先让不带 skill 的 AI 实测踩坑（基线），再对照验证带
+                skill 后坑位全部规避，才随包发布。
+              </p>
+            </section>
+          </>
         ) : (
           <>
             {/* 面包屑：第二层里始终看得见自己在哪、怎么回去 */}
