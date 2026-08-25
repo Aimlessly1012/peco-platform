@@ -60,7 +60,7 @@ export default function HomePage() {
     <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-10 px-7 py-12">
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-[30px] font-semibold leading-none">peco</h1>
+          <h1 className="text-[30px] font-semibold leading-none">peko</h1>
           <span className="text-[11px] text-dim">
             $ ls ~/works<span className="text-accent">_</span>
           </span>

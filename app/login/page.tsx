@@ -24,7 +24,7 @@ function LoginInner() {
       <div className="w-full max-w-[420px]">
         <div className="mb-6 flex items-center gap-[9px]">
           <span className="block h-[9px] w-[9px] bg-accent" />
-          <span className="text-sm font-semibold tracking-wide">PECO</span>
+          <span className="text-sm font-semibold tracking-wide">PEKO</span>
           <span className="text-[11px] text-dim">
             $ auth --github<span className="text-accent">_</span>
           </span>

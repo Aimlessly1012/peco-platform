@@ -5,7 +5,7 @@ import "./fonts.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "peco — 首页",
+  title: "peko — 首页",
   description: "个人作品集平台：RAG Coder、heitu 组件库",
 };
 

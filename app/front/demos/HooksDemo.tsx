@@ -170,7 +170,7 @@ function DomPanel() {
 }
 
 function StoragePanel() {
-  const [note, setNote, removeNote] = useLocalStorage<string>("peco-front-demo", "");
+  const [note, setNote, removeNote] = useLocalStorage<string>("peko-front-demo", "");
   return (
     <Panel title="持久化" hooks={["useLocalStorage"]}>
       <Space.Compact style={{ width: "100%" }}>
@@ -181,7 +181,7 @@ function StoragePanel() {
         />
         <Button onClick={() => removeNote()}>清除</Button>
       </Space.Compact>
-      <Out>localStorage[&quot;peco-front-demo&quot;] = {JSON.stringify(note ?? "")}</Out>
+      <Out>localStorage[&quot;peko-front-demo&quot;] = {JSON.stringify(note ?? "")}</Out>
     </Panel>
   );
 }

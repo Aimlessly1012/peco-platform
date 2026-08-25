@@ -34,10 +34,10 @@ export default function TopBar() {
         <div className="flex items-center gap-[9px]">
           <span className="block h-[9px] w-[9px] bg-accent" />
           <Link href="/" className="text-sm font-semibold tracking-wide">
-            PECO
+            PEKO
           </Link>
         </div>
-        <span className="hidden truncate text-xs text-dim xl:block">peco://{path}</span>
+        <span className="hidden truncate text-xs text-dim xl:block">peko://{path}</span>
 
         <nav className="flex items-center gap-4 text-[11px] tracking-wide">
           {items.map((n) => {
