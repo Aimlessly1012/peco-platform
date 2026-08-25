@@ -8,6 +8,7 @@ import CopyButton from "@/components/rag/CopyButton";
 import StageBar from "@/components/rag/StageBar";
 import {
   api,
+  API_BASE,
   IndexJob,
   isNotFound,
   mcpEndpoint,
@@ -405,6 +406,7 @@ export default function ProjectDetailPage({
         <div className="py-5">
           {tab === "understanding" && (
             <UnderstandingTab
+              projectId={projectId}
               report={report}
               state={reportState}
               error={reportError}
@@ -467,6 +469,7 @@ function SectionLabel({ text, extra }: { text: string; extra?: string }) {
  * 外加模块子导图——由已加载的模块地图数据在前端即时拼装，不发额外请求。
  */
 function UnderstandingTab({
+  projectId,
   report,
   state,
   error,
@@ -474,6 +477,7 @@ function UnderstandingTab({
   onReindex,
   onDeepen,
 }: {
+  projectId: string;
   report: UnderstandingReport | null;
   state: ReportState;
   error: string;
@@ -511,9 +515,25 @@ function UnderstandingTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="text-[10px] tracking-wide text-faint">
-        GENERATED {formatDateTime(report.generated_at)}
-        {report.depth ? ` · DEPTH ${report.depth.toUpperCase()}` : ""}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-[10px] tracking-wide text-faint">
+          GENERATED {formatDateTime(report.generated_at)}
+          {report.depth ? ` · DEPTH ${report.depth.toUpperCase()}` : ""}
+        </span>
+        {/*
+          原生下载：同域请求自动带 cookie，文件名由后端的 Content-Disposition 决定，
+          所以不加 download 属性（它会覆盖后端给的文件名）。开新标签而不是当前页跳转，
+          这样后端还没上线时 404 落在新标签里，不会把用户从报告页顶走。
+        */}
+        <a
+          href={`${API_BASE}/projects/${projectId}/report/export`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="下载整份报告的 Markdown 文件"
+          className="ml-auto border border-line px-2.5 py-1 text-[10px] tracking-wide text-muted transition-colors hover:border-ink hover:text-ink"
+        >
+          ↓ EXPORT MD
+        </a>
       </div>
 
       {reportIsFast && (
