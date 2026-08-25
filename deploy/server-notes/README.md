@@ -99,3 +99,21 @@ location / {
   后端验签读哪个名字由 RAG `.env` 的 `PLATFORM_COOKIE_NAME` 决定——两边必须同步换，
   只换一边的症状是：平台登录正常、`/rag` 页面能进，但所有 `/rag/api/*` 全 401。
 - GitHub OAuth App 的 Authorization callback URL 必须登记 `https://baotao.wang/api/auth/callback/github`。
+
+## M13 任务栈（2026-08-25 上线）：Celery + RabbitMQ + MinIO
+
+- 索引任务在独立 worker 容器执行（Celery，concurrency=1）；backend 只投递。
+  三个新容器 mem_limit：rabbitmq 256m / minio 256m / worker 768m。
+  实测常驻：rabbitmq ~131M、minio ~142M、worker 空闲 ~187M / 索引峰值 ~275M+，
+  上线后全机 available ~1.4G。
+- **回滚开关**：RAG `.env` 的 `TASK_QUEUE_ENABLED`。改回 false + 重启 backend
+  即回到 M12 进程内行为（索引不再依赖 rabbitmq/worker），不用回退镜像。
+- RabbitMQ 内存水位在 deploy/rabbitmq.conf（absolute 192MiB）——**不要**改回
+  RABBITMQ_VM_MEMORY_HIGH_WATERMARK 环境变量写法，3.9 起官方镜像见到它直接退出。
+- 破坏性验收已做：索引中途 docker restart worker，任务由 RabbitMQ 重投递自动
+  续跑（acks_late），摘要/嵌入缓存让重跑快速跳过已完成部分。孤儿 RUNNING 任务
+  在 backend 启动时重新入队（不再标 stale-failed）。
+- MinIO 凭据在 RAG `.env`（M13 段）；桶 rag-artifacts 启动自动创建。存报告导出件
+  （reports/{project_id}.md）与索引产物快照（index-snapshots/...），均非关键路径，
+  MinIO 挂了索引照跑、导出照下（只丢留档）。
+- worker 与 backend 同镜像：改后端代码后两个都要 build + up -d。
