@@ -31,6 +31,6 @@
 
 ## 6. 部署与验收
 
-- [ ] 6.1 服务器拉起三个新容器 → 部署新 backend/worker → 触发真实索引验证全链路（入队、执行、SSE 进度、产物归档）
-- [ ] 6.2 破坏性验收：索引中途 docker restart worker，任务自动续跑至成功
-- [ ] 6.3 内存验收：docker stats 记录三容器常驻与索引高峰值，对照 design 实测账；server-notes 回填运维实况（含回滚方法）
+- [x] 6.1 服务器拉起三个新容器 → 部署新 backend/worker → 触发真实索引验证全链路（入队、执行、SSE 进度、产物归档）
+- [x] 6.2 破坏性验收：索引中途 docker restart worker，任务自动续跑至成功
+- [x] 6.3 内存验收：docker stats 记录三容器常驻与索引高峰值，对照 design 实测账；server-notes 回填运维实况（含回滚方法）
