@@ -48,8 +48,61 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
+      # 启动时要把孤儿 RUNNING 任务重新入队（M13 2.3），broker 得先在
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      # 3.9 起这两个由 RabbitMQ 本体读取（镜像 entrypoint 已不再处理），仍是官方支持的写法
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./deploy/rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
+    ports:
+      - "5673:5672"   # 宿主 5672 常被别的项目占用，这里错开
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ragminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9100:9000"   # S3 API
+      - "9101:9001"   # 控制台
+
+  worker:
+    build: ./backend
+    # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
+    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+    volumes:
+      - ./data/repos:/data/repos   # 与 backend 同一份仓库副本
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 
 volumes:
   pgdata:
   neo4jdata:
+  rabbitmqdata:
+  miniodata:

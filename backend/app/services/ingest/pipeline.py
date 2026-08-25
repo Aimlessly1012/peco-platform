@@ -6,6 +6,7 @@ report 阶段读图产出理解报告，任何失败只把任务标 partial，�
 """
 import asyncio
 import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -58,6 +59,7 @@ from app.services.ingest.module_mapper import (
 from app.services.ingest.progress import BatchCounter, StageProgress, batch_count
 from app.services.ingest.progress_broker import job_event, progress_broker
 from app.services.ingest.router_parser import ModuleMap, parse_routes
+from app.services.storage.minio_client import put_bytes, storage_enabled
 from app.services.ingest.summarizer import (
     fallback_summary,
     fast_summary,
@@ -468,6 +470,72 @@ def _restore_missing_imports(
     return restored
 
 
+def build_index_snapshot(
+    *, job_id, project_id, name, commit_sha, stats, files, chunks, modules
+) -> dict:
+    """解析产物快照（M13 4.3）：模块划分 + 每文件的语言/归属/分块数。
+
+    存的是"这次索引解析出了什么"的结构统计，不是源码——仓库副本留在 worker
+    本地盘（design D5：git 与 tree-sitter 必须真实文件系统）。
+    """
+    chunk_counts: dict[str, int] = {}
+    for c in chunks:
+        chunk_counts[c.file_path] = chunk_counts.get(c.file_path, 0) + 1
+    return {
+        "schema": 1,
+        "project_id": str(project_id),
+        "project_name": name,
+        "job_id": str(job_id),
+        "commit_sha": commit_sha,
+        "stats": stats,
+        "modules": [
+            {
+                "key": m.key, "name": m.name,
+                "kind": m.kind, "route_prefix": m.route_prefix,
+            }
+            for m in modules
+        ],
+        "files": [
+            {
+                "path": f.path, "language": f.language,
+                "modules": f.modules, "chunks": chunk_counts.get(f.path, 0),
+            }
+            for f in files
+        ],
+    }
+
+
+def snapshot_key(project_id, job_id) -> str:
+    return f"index-snapshots/{project_id}/{job_id}.json"
+
+
+async def archive_index_snapshot(
+    job_id, project_id, name, commit_sha, stats, files, chunks, modules
+) -> None:
+    """快照归档到 MinIO。就地往 stats 写结果。
+
+    spec（artifact-storage）明确：归档失败降级为 warning，不得让索引任务失败。
+    所以这里吞掉一切异常——包括构造 payload 时的异常。
+    """
+    if not storage_enabled():
+        return
+    key = snapshot_key(project_id, job_id)
+    try:
+        payload = json.dumps(
+            build_index_snapshot(
+                job_id=job_id, project_id=project_id, name=name,
+                commit_sha=commit_sha, stats=stats, files=files,
+                chunks=chunks, modules=modules,
+            ),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        await asyncio.to_thread(put_bytes, key, payload, "application/json")
+        stats["archive_key"] = key
+    except Exception as e:  # noqa: BLE001 — 非关键路径，绝不反噬任务成败
+        stats["archive_warning"] = f"产物归档失败：{type(e).__name__}: {e}"
+        logger.warning("索引产物归档失败（不影响任务成败）：%s", e)
+
+
 async def run_index_job(
     job_id: uuid.UUID,
     project_id: uuid.UUID,
@@ -707,6 +775,9 @@ async def run_index_job(
         await _update_job(job_id, stage=JobStage.REPORT)
         report_stats = await generate_and_store_report(project_id, depth=depth)
         stats.update(report_stats)
+        await archive_index_snapshot(
+            job_id, pid, name, commit_sha, stats, files, chunks, modules_info
+        )
         await _update_job(job_id, stats_json=stats)
 
         await _finish(job_id, project_id, commit_sha=commit_sha, depth=depth)
@@ -722,12 +793,50 @@ async def run_index_job(
         await _finish(job_id, project_id, error=f"索引失败：{type(e).__name__}: {e}")
 
 
+class TaskQueueUnavailable(RuntimeError):
+    """投递失败（broker 不可用）。API 层转 503——任务没进队列就不能骗前端说已受理。"""
+
+
+def requested_params(job: IndexJob) -> tuple[str, str]:
+    """从 job 还原当初请求的 mode/depth（孤儿回收重新入队时要用）。
+
+    stats_json 在管道里会被整体覆盖写，所以两处都兜：建任务时写的 requested_*，
+    以及 parse 之后 stats 里的实际 mode/depth。都读不到就按默认值来——
+    auto + deep 是最保守的选择（auto 自己会在条件不足时回退全量）。
+    """
+    stats = job.stats_json or {}
+    mode = stats.get("requested_mode")
+    if mode not in VALID_MODES:
+        # 管道已覆盖 stats：actual mode 为 incremental 说明当初允许增量，等价于 auto
+        mode = MODE_FULL if stats.get("mode") == MODE_FULL else MODE_AUTO
+    depth = stats.get("requested_depth") or stats.get("depth")
+    return mode, depth if depth in VALID_DEPTHS else IndexDepth.DEEP
+
+
+async def _discard_job(
+    job_id: uuid.UUID, project_id: uuid.UUID, previous_status: str
+) -> None:
+    """投递失败时抹掉刚建的任务：留一条 RUNNING 记录会把项目永久卡在 409。"""
+    async with SessionLocal() as session:
+        job = await session.get(IndexJob, job_id)
+        if job is not None:
+            await session.delete(job)
+        project = await session.get(Project, project_id)
+        if project is not None:
+            project.status = previous_status
+        await session.commit()
+
+
 async def start_index_job(
     project_id: uuid.UUID, mode: str = MODE_AUTO, depth: str = IndexDepth.DEEP
 ) -> IndexJob | None:
-    """创建任务并启动后台协程；已有 running 任务返回 None（API 层转 409）。
+    """创建任务并交付执行；已有 running 任务返回 None（API 层转 409）。
 
     kind 先记为请求模式，进入管道后按实际路径改写为 full / incremental。
+
+    M13：TASK_QUEUE_ENABLED 时投递给 Celery worker，否则仍在本进程起协程。
+    两条路径都必须保持能跑——进程内那条是生产回滚开关（design 回滚方案：
+    改回 False 即回到 M12 行为，不用回退镜像）。
     """
     async with SessionLocal() as session:
         running = await session.scalar(
@@ -738,12 +847,29 @@ async def start_index_job(
         )
         if running:
             return None
-        job = IndexJob(project_id=project_id, kind=MODE_FULL)
-        session.add(job)
         project = await session.get(Project, project_id)
+        previous_status = project.status
+        job = IndexJob(
+            project_id=project_id, kind=MODE_FULL,
+            # 孤儿回收要按原样重投，把请求参数留个底（管道跑起来后会被真 stats 覆盖）
+            stats_json={"requested_mode": mode, "requested_depth": depth},
+        )
+        session.add(job)
         project.status = ProjectStatus.INDEXING
         await session.commit()
         await session.refresh(job)
 
-    asyncio.create_task(run_index_job(job.id, project_id, mode, depth))
+    if not settings.task_queue_enabled:
+        asyncio.create_task(run_index_job(job.id, project_id, mode, depth))
+        return job
+
+    # 延迟导入：celery_tasks 反过来要 import 本模块，且关掉队列时不该把 celery 拖进来
+    from app.services.ingest.celery_tasks import enqueue_index_job
+
+    try:
+        await asyncio.to_thread(enqueue_index_job, job.id, project_id, mode, depth)
+    except Exception as e:  # noqa: BLE001 — 连不上 broker 的形态很多，一律当投递失败
+        await _discard_job(job.id, project_id, previous_status)
+        logger.error("索引任务投递失败，已撤销任务记录：%s", e)
+        raise TaskQueueUnavailable("任务队列不可用") from e
     return job

@@ -75,6 +75,19 @@ class Settings(BaseSettings):
     # 生产是 HTTP，cookie 名没有 __Secure- 前缀；上 HTTPS 后平台会改成 __Secure-next-auth.session-token
     platform_cookie_name: str = "next-auth.session-token"
 
+    # M13：任务队列（Celery + RabbitMQ）。False = 旧的进程内 asyncio 路径，
+    # 这是部署回滚开关：生产出问题时改回 False 即回到 M12 行为，不用回退镜像
+    task_queue_enabled: bool = False
+    rabbitmq_url: str = "amqp://rag:ragpass@rabbitmq:5672//"
+
+    # M13：MinIO 对象存储（报告导出件 + 索引产物归档，均非关键路径）。
+    # access key 为空 = 完全禁用，所有存储调用降级为 no-op
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "rag-artifacts"
+    minio_secure: bool = False
+
     repos_dir: Path = Path("./data/repos")
 
     retrieval_top_k: int = 8

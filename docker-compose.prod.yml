@@ -60,8 +60,67 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
+      # 启动时要把孤儿 RUNNING 任务重新入队（M13 2.3），broker 得先在
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./deploy/rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
+    restart: unless-stopped
+    # 内存水位（192MiB）写在挂进去的 rabbitmq.conf 里：relative 会按宿主 3.6G 算，
+    # 那样这里的 mem_limit 只会变成一记 OOM kill
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ragminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
+    volumes:
+      - miniodata:/data
+    restart: unless-stopped
+    mem_limit: 256m
+    # 不对外暴露端口：只有 compose 网络内的 backend/worker 用它。
+    # 要开控制台排查时临时加：ports: ["127.0.0.1:9101:9001"]
+
+  worker:
+    build: ./backend
+    # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
+    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+    volumes:
+      - ./data/repos:/data/repos     # 与 backend 同一份仓库副本
+    restart: unless-stopped
+    # 索引大仓时实测 400~600MB（design 内存账），768 留一档余量；
+    # 超限被杀的只是 worker，任务由 acks_late 重投递续跑
+    mem_limit: 768m
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 
 volumes:
   pgdata:
   neo4jdata:
+  rabbitmqdata:
+  miniodata:

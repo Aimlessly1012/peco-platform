@@ -1,9 +1,10 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
@@ -16,13 +17,49 @@ from app.mcp_server.auth import MCPAuthMiddleware
 from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
 from app.services.auth.bootstrap import check_secret_key
+from app.services.storage.minio_client import ensure_bucket_quietly
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 async def _recover_stale_jobs() -> None:
-    """进程重启后，将 running 任务标记为 failed(stale)，项目状态回退（spec: 任务恢复语义）。"""
+    """进程重启后的在途任务处理。
+
+    M13 起分两条路：开了任务队列就把 RUNNING 的任务重新入队（spec: 启动时孤儿任务
+    回收——重投而非标 failed，幂等门保证与 broker 里可能还在的那条消息双跑无害）；
+    没开队列时保持 M12 行为，标 failed(stale) 等人重新触发。
+    """
+    if settings.task_queue_enabled:
+        await _requeue_stale_jobs()
+        return
+    await _fail_stale_jobs()
+
+
+async def _requeue_stale_jobs() -> None:
+    """把孤儿 RUNNING 任务重新投递。投递失败只告警——不能因为 broker 没起来就拒绝启动。"""
+    from app.services.ingest.celery_tasks import enqueue_index_job
+    from app.services.ingest.pipeline import requested_params
+
+    async with SessionLocal() as session:
+        rows = await session.scalars(
+            select(IndexJob).where(IndexJob.status == JobStatus.RUNNING)
+        )
+        pending = [(j.id, j.project_id, *requested_params(j)) for j in rows]
+
+    requeued = 0
+    for job_id, project_id, mode, depth in pending:
+        try:
+            enqueue_index_job(job_id, project_id, mode, depth)
+            requeued += 1
+        except Exception as e:  # noqa: BLE001 — 单个投递失败不该拖垮启动
+            logger.warning("孤儿任务 %s 重新入队失败：%s", job_id, e)
+    if pending:
+        logger.warning("孤儿 RUNNING 任务 %d 个，已重新入队 %d 个", len(pending), requeued)
+
+
+async def _fail_stale_jobs() -> None:
+    """进程内执行时代的语义：running 任务标 failed(stale)，项目状态回退。"""
     async with SessionLocal() as session:
         result = await session.execute(
             update(IndexJob)
@@ -44,18 +81,37 @@ async def _recover_stale_jobs() -> None:
         await session.commit()
 
 
+async def _start_progress_consumer():
+    """M13 D4：开了任务队列才需要跨进程进度——索引在别的容器里跑。"""
+    if not settings.task_queue_enabled:
+        return None
+    from app.services.ingest.progress_transport import start_progress_consumer
+
+    try:
+        return await start_progress_consumer()
+    except Exception as e:  # noqa: BLE001 — 进度是增强项，连不上不该拦住启动
+        logger.warning("进度消费者启动失败，SSE 只能看到本进程事件：%s", e)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ensure_vector_index()
     check_secret_key()  # M8：默认/过短的 SECRET_KEY 会让登录态可伪造
     await _recover_stale_jobs()
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
-    # MCP session manager 必须在这里启动：Starlette 的 Mount 不传播 lifespan，
-    # 子应用自带的 lifespan 不会被触发（设计 D4）。
-    async with mcp.session_manager.run():
-        logger.info("MCP 端点已就绪：POST /mcp（streamable-http）")
-        yield
-    await close_driver()
+    await asyncio.to_thread(ensure_bucket_quietly)  # M13：MinIO 桶（非关键路径）
+    consumer = await _start_progress_consumer()
+    try:
+        # MCP session manager 必须在这里启动：Starlette 的 Mount 不传播 lifespan，
+        # 子应用自带的 lifespan 不会被触发（设计 D4）。
+        async with mcp.session_manager.run():
+            logger.info("MCP 端点已就绪：POST /mcp（streamable-http）")
+            yield
+    finally:
+        if consumer is not None:
+            await consumer.aclose()
+        await close_driver()
 
 
 def create_app() -> FastAPI:

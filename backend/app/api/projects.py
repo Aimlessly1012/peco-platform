@@ -1,10 +1,12 @@
 """项目管理 API：CRUD + 索引触发 + 任务进度查询。"""
+import asyncio
+import logging
 import shutil
 import uuid
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,7 @@ from app.services.ingest.pipeline import (
     MODE_AUTO,
     VALID_DEPTHS,
     VALID_MODES,
+    TaskQueueUnavailable,
     start_index_job,
 )
 from app.services.ingest.progress_broker import (
@@ -34,6 +37,9 @@ from app.services.ingest.progress_broker import (
 )
 from app.services.auth.deps import require_admin, require_user
 from app.services.report.graph_reader import read_project_tree
+from app.services.storage.minio_client import put_bytes
+
+logger = logging.getLogger(__name__)
 
 # M8：整组业务路由要求登录态。/auth/*、/health、/mcp 不在此列（见 deps.py 注释）
 router = APIRouter(
@@ -112,7 +118,11 @@ async def trigger_index(
     if depth not in VALID_DEPTHS:
         raise HTTPException(422, f"depth 仅支持 {' / '.join(VALID_DEPTHS)}")
     await _get_project_or_404(project_id, session)
-    job = await start_index_job(project_id, mode, depth)
+    try:
+        job = await start_index_job(project_id, mode, depth)
+    except TaskQueueUnavailable:
+        # M13：任务没进队列就没人会执行它，不能返回 202 让前端空等进度
+        raise HTTPException(503, "任务队列不可用，请稍后重试") from None
     if job is None:
         raise HTTPException(409, "该项目已有索引任务在运行")
     return job
@@ -188,6 +198,40 @@ async def get_report(
         # 没有文档正文即 fast 产物（程序化两件）——前端据此显示「生成深度理解」
         depth=IndexDepth.FAST if not report.doc_markdown else IndexDepth.DEEP,
         generated_at=report.generated_at,
+    )
+
+
+@router.get("/{project_id}/report/export")
+async def export_report(
+    project_id: uuid.UUID, session: AsyncSession = Depends(get_session)
+):
+    """理解报告导出为 Markdown 文件（M13 4.2）。
+
+    正文 = 文档正文 + 需求功能导图。同时写一份进 MinIO（reports/{project_id}.md）
+    留档，但对象存储是非关键路径：上传失败只记 warning，文件照常返回给用户。
+    """
+    await _get_project_or_404(project_id, session)
+    report = await session.scalar(
+        select(UnderstandingReport).where(UnderstandingReport.project_id == project_id)
+    )
+    if report is None:
+        raise HTTPException(404, "该项目还没有理解报告，请重新索引以生成报告")
+
+    content = f"{report.doc_markdown or ''}\n\n{report.feature_map_markdown or ''}"
+    payload = content.encode("utf-8")
+    try:
+        await asyncio.to_thread(
+            put_bytes, f"reports/{project_id}.md", payload, "text/markdown"
+        )
+    except Exception as e:  # noqa: BLE001 — 留档失败不该让用户下不到文件
+        logger.warning("报告导出件上传 MinIO 失败（不影响下载）：%s", e)
+
+    return Response(
+        content=payload,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="report-{project_id}.md"'
+        },
     )
 
 

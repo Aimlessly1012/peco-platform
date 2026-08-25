@@ -78,6 +78,7 @@ _SESSION_LOCAL_USERS = (
     "app.mcp_server.server",
     "app.api.chat",
     "app.services.auth.bootstrap",   # M8 管理员初始化在 lifespan 里查 users 表
+    "app.services.ingest.celery_tasks",  # M13 幂等门要查 index_jobs 表
 )
 
 
