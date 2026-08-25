@@ -78,3 +78,19 @@ location / {
 补回原先靠末尾斜杠实现的剥前缀。
 
 实测：重建容器后不 reload，公网直接 200。
+
+## 域名与 HTTPS（2026-08-25 上线）
+
+- 域名 `heitu.wang`，DNS 在腾讯云 DNSPod：`@` 与 `www` 两条 A 记录 → 43.167.170.20。
+  服务器是腾讯云**东京**（ap-tokyo），境外机器，无需 ICP 备案。
+- 入口统一收敛到 `https://heitu.wang`：80 端口只留 ACME 验证路径，其余（含 IP 直访、www）
+  一律 301 过去。MCP 接入地址随之变为 `https://heitu.wang/rag/api/mcp`。
+- 证书：宿主机 certbot 2.9.0（apt），`certbot certonly --webroot -w /var/www/certbot`。
+  `/etc/letsencrypt` 与 `/var/www/certbot` 以只读挂载进 nginx 容器（见 server.yml）。
+  续期靠 apt 自带的 certbot.timer（每日两跑）；**续期后容器不会自己换证书句柄**，
+  `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` 负责 `docker exec rag_coder-nginx-1 nginx -s reload`。
+- **cookie 名连带（重要）**：NEXTAUTH_URL 换成 https 后，NextAuth 自动把会话 cookie
+  改名为 `__Secure-next-auth.session-token`（http 时代叫 `next-auth.session-token`）。
+  后端验签读哪个名字由 RAG `.env` 的 `PLATFORM_COOKIE_NAME` 决定——两边必须同步换，
+  只换一边的症状是：平台登录正常、`/rag` 页面能进，但所有 `/rag/api/*` 全 401。
+- GitHub OAuth App 的 Authorization callback URL 必须登记 `https://heitu.wang/api/auth/callback/github`。
