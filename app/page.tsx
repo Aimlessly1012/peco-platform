@@ -59,16 +59,7 @@ export default function HomePage() {
   return (
     <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-10 px-7 py-12">
       <section className="flex flex-col gap-3">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-[30px] font-semibold leading-none">peko</h1>
-          <span className="text-[11px] text-dim">
-            $ ls ~/works<span className="text-accent">_</span>
-          </span>
-        </div>
-        <p className="max-w-[640px] text-[13px] leading-relaxed text-muted">
-          全栈开发。这里放两件自己从头做完的东西：一个把代码库变成可问答知识库的
-          RAG 系统，一个自研的 React 组件库。
-        </p>
+        <h1 className="text-[30px] font-semibold leading-none">peko</h1>
       </section>
 
       <section className="flex flex-col gap-4">
@@ -140,9 +131,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="border-t border-hair pt-5 text-[10px] leading-relaxed text-faint">
-        peco-platform · Next.js 15 + Tailwind v3 · 终端风设计令牌与 RAG Coder 同源
-      </footer>
     </div>
   );
 }
