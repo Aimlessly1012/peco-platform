@@ -116,6 +116,20 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  /**
+   * send() 刚内嵌创建的会话 id。创建后 setActiveSession 会触发下面「切会话拉历史」
+   * 的 effect，而新会话历史必然为空——那次 setMessages([]) 会把刚乐观插入的提问
+   * 和流式占位整个覆盖掉（实测 bug：首次发送"没有效果"，只多了个会话）。
+   * 用这个 ref 让 effect 跳过那一次拉取。
+   */
+  const freshSessionRef = useRef<string | null>(null);
+  /** 改名编辑态：正在编辑的会话 id 与草稿标题 */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  /** 删除二次确认：第一次点 × 只是把它变成「确认」，再点才真删 */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  /** 初次进入自动建会话只做一次（StrictMode 下 effect 会双跑，不能建两个） */
+  const autoCreatedRef = useRef(false);
   /** 待跳转的引用编号（点上标后置位，等右栏渲染出对应条目再滚动）。 */
   const [pendingCite, setPendingCite] = useState<number | null>(null);
   const [citeFlash, setCiteFlash] = useState<number | null>(null);
@@ -125,13 +139,33 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     api<Project>(`/projects/${projectId}`).then(setProject).catch(() => {});
     api<ChatSession[]>(`/projects/${projectId}/sessions`).then((list) => {
       setSessions(list);
-      if (list.length > 0) setActiveSession(list[0].id);
+      if (list.length > 0) {
+        setActiveSession(list[0].id);
+      } else if (!autoCreatedRef.current) {
+        // 初次进来默认就有一个可用会话，省掉"先点新会话"这步
+        autoCreatedRef.current = true;
+        api<ChatSession>(`/projects/${projectId}/sessions`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        })
+          .then((s) => {
+            setSessions([s]);
+            setActiveSession(s.id);
+          })
+          .catch(() => {});
+      }
     });
   }, [projectId]);
 
   useEffect(() => {
     if (!activeSession) {
       setMessages([]);
+      return;
+    }
+    if (freshSessionRef.current === activeSession) {
+      // send() 刚建的会话：本地已有乐观消息，历史为空，拉了反而清屏
+      freshSessionRef.current = null;
+      setSelected(null);
       return;
     }
     api<ChatMessage[]>(`/sessions/${activeSession}/messages`).then((list) =>
@@ -159,6 +193,34 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setSessions((prev) => [s, ...prev]);
     setActiveSession(s.id);
   }, [projectId, sessions.length]);
+
+  const renameSession = async (id: string) => {
+    const title = editTitle.trim();
+    setEditingId(null);
+    if (!title) return;
+    const s = await api<ChatSession>(`/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    });
+    setSessions((prev) => prev.map((x) => (x.id === id ? s : x)));
+  };
+
+  const deleteSession = async (id: string) => {
+    setConfirmDelete(null);
+    await api(`/sessions/${id}`, { method: "DELETE" });
+    const rest = sessions.filter((x) => x.id !== id);
+    setSessions(rest);
+    if (activeSession === id) setActiveSession(rest[0]?.id ?? null);
+    if (rest.length === 0) {
+      // 删光后补一个空会话，保持"进来就能直接问"的不变量
+      const s = await api<ChatSession>(`/projects/${projectId}/sessions`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      setSessions([s]);
+      setActiveSession(s.id);
+    }
+  };
 
   /**
    * 把第 index 条 assistant 消息接上流；首次发送与重试共用。
@@ -205,6 +267,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         method: "POST",
         body: JSON.stringify({}),
       });
+      freshSessionRef.current = s.id;
       setSessions((prev) => [s, ...prev]);
       setActiveSession(s.id);
       sessionId = s.id;
@@ -301,19 +364,63 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         </button>
         <div className="text-[10px] tracking-label text-dim">SESSIONS</div>
         <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSession(s.id)}
-              className={`truncate px-3 py-2 text-left text-xs ${
-                s.id === activeSession
-                  ? "border-l-2 border-accent bg-panel pl-2.5"
-                  : "text-muted hover:text-ink"
-              }`}
-            >
-              {s.title}
-            </button>
-          ))}
+          {sessions.map((s) =>
+            editingId === s.id ? (
+              <input
+                key={s.id}
+                autoFocus
+                onFocus={(e) => e.currentTarget.select()}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={() => renameSession(s.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") renameSession(s.id);
+                  if (e.key === "Escape") setEditingId(null);
+                }}
+                className="border border-accent bg-panel px-2.5 py-1.5 text-xs text-ink outline-none"
+              />
+            ) : (
+              <div
+                key={s.id}
+                onClick={() => setActiveSession(s.id)}
+                onDoubleClick={() => {
+                  setEditingId(s.id);
+                  setEditTitle(s.title);
+                }}
+                title="双击改名"
+                className={`group flex cursor-pointer items-center gap-1 px-3 py-2 text-xs ${
+                  s.id === activeSession
+                    ? "border-l-2 border-accent bg-panel pl-2.5"
+                    : "text-muted hover:text-ink"
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                {confirmDelete === s.id ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteSession(s.id);
+                    }}
+                    onMouseLeave={() => setConfirmDelete(null)}
+                    className="flex-none text-[10px] text-danger"
+                  >
+                    确认?
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDelete(s.id);
+                    }}
+                    title="删除会话"
+                    className="hidden flex-none text-[11px] text-faint hover:text-danger group-hover:block"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          )}
         </div>
         <div className="text-[10px] leading-relaxed text-faint">
           RETRIEVAL
