@@ -3,8 +3,17 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CapacityBar from "@/components/rag/CapacityBar";
 import StageBar from "@/components/rag/StageBar";
-import { api, IndexDepth, IndexJob, mcpEndpoint, Project } from "@/lib/rag/api";
+import {
+  api,
+  type Capacity,
+  fetchCapacity,
+  IndexDepth,
+  IndexJob,
+  mcpEndpoint,
+  Project,
+} from "@/lib/rag/api";
 import { PROJECT_STATUS_BADGE, statNumber } from "@/lib/rag/labels";
 import { useIndexProgress } from "@/lib/rag/useIndexProgress";
 
@@ -20,6 +29,8 @@ export default function ProjectListPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Record<string, IndexJob>>({});
   const [showDialog, setShowDialog] = useState(false);
+  /** null = 接口没上线或取不到，容量条整体隐藏 */
+  const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [error, setError] = useState("");
 
@@ -42,6 +53,8 @@ export default function ProjectListPage() {
     } catch (e) {
       setError((e as Error).message);
     }
+    // 容量随项目增删而变，跟着列表一起刷新；失败返回 null，不影响列表
+    setCapacity(await fetchCapacity());
   }, []);
 
   // 只在进入页面时拉一次：进度走 SSE，索引结束由行组件回调触发再拉
@@ -76,6 +89,8 @@ export default function ProjectListPage() {
     [projects, filter]
   );
   const indexingCount = projects.filter((p) => p.status === "indexing").length;
+  // 容量未知（接口没上线）时不拦——真正的拒绝在后端，前端只做提示
+  const accepting = capacity?.accepting !== false;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -127,11 +142,15 @@ export default function ProjectListPage() {
           </div>
           <button
             onClick={() => setShowDialog(true)}
-            className="border border-accent bg-accent/[.06] px-4 py-2 text-xs font-medium tracking-wide text-accent hover:bg-accent/[.12]"
+            disabled={!accepting}
+            title={accepting ? undefined : (capacity?.reason ?? "当前不接受新建项目")}
+            className="border border-accent bg-accent/[.06] px-4 py-2 text-xs font-medium tracking-wide text-accent hover:bg-accent/[.12] disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-faint disabled:hover:bg-transparent"
           >
             + 录入项目
           </button>
         </div>
+
+        <CapacityBar capacity={capacity} />
 
         {error && (
           <div className="border-l-2 border-danger bg-danger/[.06] px-3 py-2 text-xs text-danger">

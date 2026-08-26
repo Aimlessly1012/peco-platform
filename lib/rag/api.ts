@@ -204,6 +204,33 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/**
+ * GET /meta/capacity —— 服务器容量护栏（M14）。
+ * 小机器上项目槽位与磁盘都有限，超限时后端拒绝新建，`reason` 是给用户看的完整中文句子。
+ */
+export interface Capacity {
+  projects_used: number;
+  projects_limit: number;
+  disk_free_gb: number;
+  disk_total_gb: number;
+  /** false = 当前不接受新建项目 */
+  accepting: boolean;
+  /** 不接受时的原因，直接展示给用户 */
+  reason: string | null;
+}
+
+/**
+ * 取容量信息。后端未上线或出错时返回 null——容量条只是增强信息，
+ * 拿不到就整体隐藏，绝不能让列表页跟着坏。
+ */
+export async function fetchCapacity(): Promise<Capacity | null> {
+  try {
+    return await api<Capacity>("/meta/capacity");
+  } catch {
+    return null;
+  }
+}
+
 export interface AskCallbacks {
   onToken: (t: string) => void;
   onCitations: (c: Citation[]) => void;
