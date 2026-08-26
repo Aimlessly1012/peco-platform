@@ -36,6 +36,7 @@ from app.services.ingest.progress_broker import (
     progress_broker,
 )
 from app.services.auth.deps import require_admin, require_user
+from app.services.capacity import get_capacity
 from app.services.report.graph_reader import read_project_tree
 from app.services.storage.minio_client import put_bytes
 
@@ -58,6 +59,15 @@ async def _get_project_or_404(project_id: uuid.UUID, session: AsyncSession) -> P
 async def create_project(
     payload: ProjectCreate, session: AsyncSession = Depends(get_session)
 ):
+    """M14：录入前过容量双护栏。
+
+    校验必须在建记录之前——先落库再回滚的话，并发下会短暂出现超额项目，
+    而且失败路径要多维护一条清理逻辑。重索引与删除不走这里，不受容量限制。
+    """
+    capacity = await get_capacity(session)
+    if not capacity.accepting:
+        raise HTTPException(409, capacity.reason)
+
     project = Project(
         name=payload.name,
         git_url=payload.git_url,

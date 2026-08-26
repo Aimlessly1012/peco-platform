@@ -1,10 +1,13 @@
-"""服务元信息：MCP 接入说明数据源（M4 B11，供 /mcp-guide 页展示）。"""
+"""服务元信息：MCP 接入说明数据源（M4 B11）+ 容量状态（M14）。"""
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.db import get_session
 from app.mcp_server.server import mcp
 
 from app.services.auth.deps import require_user
+from app.services.capacity import get_capacity
 
 router = APIRouter(tags=["meta"], dependencies=[Depends(require_user)])
 
@@ -38,3 +41,13 @@ async def mcp_info(request: Request):
             for tool in tools
         ],
     }
+
+
+@router.get("/meta/capacity")
+async def capacity(session: AsyncSession = Depends(get_session)):
+    """容量状态（M14）：槽位用量 + 磁盘剩余 + 是否还接受新项目。
+
+    reason 只在 accepting=false 时非空，且已经是可直接展示的整句——
+    前端拿到就渲染，不要再拼文案（design D3）。
+    """
+    return (await get_capacity(session)).as_dict()

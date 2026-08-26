@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     minio_bucket: str = "rag-artifacts"
     minio_secure: bool = False
 
+    # M14 容量护栏：项目数是主约束（Neo4j 内存随项目数涨），磁盘是兜底。
+    # 上线后按 docker stats 实测回调 project_limit
+    project_limit: int = 8
+    disk_min_free_gb: float = 5
+
     repos_dir: Path = Path("./data/repos")
 
     retrieval_top_k: int = 8
