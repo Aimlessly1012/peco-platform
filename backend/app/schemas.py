@@ -127,6 +127,10 @@ class ChatSessionCreate(BaseModel):
     title: str | None = None
 
 
+class ChatSessionRename(BaseModel):
+    title: str
+
+
 class ChatSessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

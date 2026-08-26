@@ -17,7 +17,13 @@ from app.models.tables import (
     User,
     UserRole,
 )
-from app.schemas import AskRequest, ChatMessageOut, ChatSessionCreate, ChatSessionOut
+from app.schemas import (
+    AskRequest,
+    ChatMessageOut,
+    ChatSessionCreate,
+    ChatSessionOut,
+    ChatSessionRename,
+)
 from app.services.auth.deps import require_user
 from app.services.qa.workflow import qa_graph
 
@@ -87,6 +93,36 @@ async def list_sessions(
         .order_by(desc(ChatSession.created_at))
     )
     return list(result)
+
+
+@router.patch("/sessions/{session_id}", response_model=ChatSessionOut)
+async def rename_session(
+    session_id: uuid.UUID,
+    payload: ChatSessionRename,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    """会话改名（M14+）。标题截到列宽以内，空白名直接拒绝。"""
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(422, "会话名不能为空")
+    chat = await _owned_session(session_id, session, user)
+    chat.title = title[:200]
+    await session.commit()
+    await session.refresh(chat)
+    return chat
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
+):
+    """删除会话（M14+）。消息随 FK CASCADE 一并删除；别人的会话 404（不泄露存在性）。"""
+    chat = await _owned_session(session_id, session, user)
+    await session.delete(chat)
+    await session.commit()
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
