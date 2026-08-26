@@ -117,3 +117,11 @@ location / {
   （reports/{project_id}.md）与索引产物快照（index-snapshots/...），均非关键路径，
   MinIO 挂了索引照跑、导出照下（只丢留档）。
 - worker 与 backend 同镜像：改后端代码后两个都要 build + up -d。
+
+## M14 容量护栏（2026-08-26）
+
+- 双护栏：`PROJECT_LIMIT=8`（主约束，项目数是 Neo4j 内存的代理指标）+ `DISK_MIN_FREE_GB=5`
+  （兜底），都在 RAG `.env`。只拦新建项目；重索引/删除不受限。
+- 线上验证过：临时调 LIMIT=2 → capacity accepting=false、创建 409 带原因、不落库；调回即恢复。
+- **docker-compose.server.yml 已纳入 git 仓库**：它曾是服务器专有文件，2026-08-26 部署时被
+  rsync --delete 误删（本文件早前记载的坑第二次咬人）。文件无秘密，入库后 rsync 自然携带。
