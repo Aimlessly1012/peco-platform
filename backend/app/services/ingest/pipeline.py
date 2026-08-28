@@ -7,6 +7,9 @@ report 阶段读图产出理解报告，任何失败只把任务标 partial，�
 import asyncio
 import hashlib
 import json
+import tempfile
+import subprocess
+import os
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -59,7 +62,13 @@ from app.services.ingest.module_mapper import (
 from app.services.ingest.progress import BatchCounter, StageProgress, batch_count
 from app.services.ingest.progress_broker import job_event, progress_broker
 from app.services.ingest.router_parser import ModuleMap, parse_routes
-from app.services.storage.minio_client import put_bytes, storage_enabled
+from app.services.storage.minio_client import (
+    list_keys,
+    put_bytes,
+    remove_key,
+    storage_enabled,
+    upload_file,
+)
 from app.services.ingest.summarizer import (
     fallback_summary,
     fast_summary,
@@ -536,6 +545,59 @@ async def archive_index_snapshot(
         logger.warning("索引产物归档失败（不影响任务成败）：%s", e)
 
 
+REPO_ARCHIVE_KEEP = 3
+
+
+def repo_archive_key(project_id, commit_sha) -> str:
+    return f"repo-archives/{project_id}/{commit_sha}.tar.gz"
+
+
+async def archive_repo_tarball(project_id, repo_dir: Path, commit_sha, stats) -> None:
+    """源码归档到 MinIO：git archive 打 HEAD 的工作树（不含 .git），每项目留最近 3 份。
+
+    这不是把工作副本搬走——repos 本地盘照旧是唯一的干活目录。归档的价值：
+    项目删除/本地清理后仍可回溯"当次问答依据的源码"，将来多机 worker 也能
+    从这里取码。同 commit 重复索引 key 相同，覆盖无害。
+    与快照归档同一条纪律：失败只记 warning，绝不反噬任务成败。
+    """
+    if not storage_enabled():
+        return
+    key = repo_archive_key(project_id, commit_sha)
+    tmp = None
+    try:
+        fd, tmp = await asyncio.to_thread(
+            tempfile.mkstemp, suffix=".tar.gz", prefix="repo-archive-"
+        )
+        os.close(fd)
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(repo_dir), "archive", "--format=tar.gz", "-o", tmp, "HEAD"],
+            check=True,
+            capture_output=True,
+        )
+        await asyncio.to_thread(upload_file, key, tmp, "application/gzip")
+        stats["repo_archive_key"] = key
+
+        # 保留策略：按对象时间倒序留 3 份，防止归档无限膨胀
+        existing = await asyncio.to_thread(list_keys, f"repo-archives/{project_id}/")
+        stale = sorted(existing, key=lambda kv: kv[1], reverse=True)[REPO_ARCHIVE_KEEP:]
+        for old_key, _ in stale:
+            await asyncio.to_thread(remove_key, old_key)
+    except Exception as e:  # noqa: BLE001 — 非关键路径，绝不反噬任务成败
+        stats["repo_archive_warning"] = f"源码归档失败：{type(e).__name__}: {e}"
+        logger.warning("源码 tarball 归档失败（不影响任务成败）：%s", e)
+    finally:
+        if tmp:
+            await asyncio.to_thread(_unlink_quiet, tmp)
+
+
+def _unlink_quiet(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 async def run_index_job(
     job_id: uuid.UUID,
     project_id: uuid.UUID,
@@ -778,6 +840,7 @@ async def run_index_job(
         await archive_index_snapshot(
             job_id, pid, name, commit_sha, stats, files, chunks, modules_info
         )
+        await archive_repo_tarball(pid, repo_dir, commit_sha, stats)
         await _update_job(job_id, stats_json=stats)
 
         await _finish(job_id, project_id, commit_sha=commit_sha, depth=depth)

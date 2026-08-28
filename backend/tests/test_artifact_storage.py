@@ -298,3 +298,66 @@ async def test_export_requires_login(anon_client, test_db, minio_off):
     resp = await anon_client.get(f"/projects/{pid}/report/export")
 
     assert resp.status_code == 401
+
+
+# ---------------- 源码 tarball 归档 ----------------
+
+import subprocess as _subprocess
+
+
+def _make_git_repo(tmp_path):
+    """真实的最小 git 仓库：git archive 需要真仓库，mock 反而测不到打包这一步。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "main.py").write_text("print('hi')\n")
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "add", "."],
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+    ):
+        _subprocess.run(cmd, cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+async def test_repo_tarball_archived(tmp_path, monkeypatch):
+    from app.services.ingest import pipeline
+
+    repo = _make_git_repo(tmp_path)
+    uploaded = {}
+    monkeypatch.setattr(pipeline, "storage_enabled", lambda: True)
+    monkeypatch.setattr(
+        pipeline, "upload_file",
+        lambda key, path, ct: uploaded.update(key=key, size=__import__("os").path.getsize(path)) or key,
+    )
+    monkeypatch.setattr(pipeline, "list_keys", lambda prefix: [])
+    stats = {}
+    await pipeline.archive_repo_tarball("pid-1", repo, "abc123", stats)
+    assert stats["repo_archive_key"] == "repo-archives/pid-1/abc123.tar.gz"
+    assert uploaded["key"] == stats["repo_archive_key"]
+    assert uploaded["size"] > 0  # tarball 真的被打出来了
+
+
+async def test_repo_tarball_retention(tmp_path, monkeypatch):
+    """超过 3 份删最旧：5 份历史 → 删时间最早的 2 份。"""
+    from app.services.ingest import pipeline
+
+    repo = _make_git_repo(tmp_path)
+    removed = []
+    history = [(f"repo-archives/p/{i}.tar.gz", i) for i in range(5)]  # 数字当时间
+    monkeypatch.setattr(pipeline, "storage_enabled", lambda: True)
+    monkeypatch.setattr(pipeline, "upload_file", lambda *a, **k: a[0])
+    monkeypatch.setattr(pipeline, "list_keys", lambda prefix: history)
+    monkeypatch.setattr(pipeline, "remove_key", lambda key: removed.append(key))
+    await pipeline.archive_repo_tarball("p", repo, "new", {})
+    assert sorted(removed) == ["repo-archives/p/0.tar.gz", "repo-archives/p/1.tar.gz"]
+
+
+async def test_repo_tarball_failure_is_warning(tmp_path, monkeypatch):
+    """repo 目录不是 git 仓库 → git archive 失败 → 只记 warning 不抛。"""
+    from app.services.ingest import pipeline
+
+    monkeypatch.setattr(pipeline, "storage_enabled", lambda: True)
+    stats = {}
+    await pipeline.archive_repo_tarball("p", tmp_path / "not-a-repo", "sha", stats)
+    assert "repo_archive_warning" in stats
+    assert "repo_archive_key" not in stats

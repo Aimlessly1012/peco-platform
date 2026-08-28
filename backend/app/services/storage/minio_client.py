@@ -1,7 +1,9 @@
 """MinIO 对象存储封装（M13 D5）。
 
-只承担两类非关键路径产物：①理解报告导出件 ②索引完成后的解析产物快照。
-仓库工作副本一律留在本地盘——git pull 与 tree-sitter 必须真实文件系统。
+只承担三类非关键路径产物：①理解报告导出件 ②索引完成后的解析产物快照
+③每次成功索引的源码 tarball 归档（git archive，不含 .git）。
+仓库工作副本一律留在本地盘——git pull 与 tree-sitter 必须真实文件系统；
+MinIO 里存的是快照归档，不是工作存储。
 
 MINIO_ACCESS_KEY 为空 = 整个模块 no-op（返回 None），调用方不必写分支判断；
 这也是本地开发和不想跑 MinIO 的部署形态的默认状态。
@@ -99,3 +101,35 @@ def put_bytes(
         content_type=content_type,
     )
     return key
+
+
+def upload_file(
+    key: str, file_path: str, content_type: str = "application/octet-stream"
+) -> str | None:
+    """上传本地文件（流式，适合 tarball 这类不该整读进内存的对象）。语义同 put_bytes。"""
+    client = get_client()
+    if client is None:
+        return None
+    if not _bucket_ready:
+        ensure_bucket()
+    client.fput_object(settings.minio_bucket, key, file_path, content_type=content_type)
+    return key
+
+
+def list_keys(prefix: str) -> list[tuple[str, object]]:
+    """列出前缀下的对象 (key, last_modified)。未启用返回空列表。"""
+    client = get_client()
+    if client is None:
+        return []
+    return [
+        (obj.object_name, obj.last_modified)
+        for obj in client.list_objects(settings.minio_bucket, prefix=prefix)
+    ]
+
+
+def remove_key(key: str) -> None:
+    """删除对象（幂等：不存在也不报错——S3 DeleteObject 语义本就如此）。"""
+    client = get_client()
+    if client is None:
+        return
+    client.remove_object(settings.minio_bucket, key)
