@@ -7,10 +7,9 @@ report 阶段读图产出理解报告，任何失败只把任务标 partial，�
 import asyncio
 import hashlib
 import json
-import tempfile
-import subprocess
-import os
 import logging
+import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +40,9 @@ from app.services.ingest.git_ops import (
     GitDiffError,
     GitPullError,
     diff_changed_files,
-    pull_repo,
+    export_bundle,
+    ls_remote_head,
+    restore_workdir,
 )
 from app.services.ingest.graph_writer import (
     FileInfo,
@@ -62,13 +63,7 @@ from app.services.ingest.module_mapper import (
 from app.services.ingest.progress import BatchCounter, StageProgress, batch_count
 from app.services.ingest.progress_broker import job_event, progress_broker
 from app.services.ingest.router_parser import ModuleMap, parse_routes
-from app.services.storage.minio_client import (
-    list_keys,
-    put_bytes,
-    remove_key,
-    storage_enabled,
-    upload_file,
-)
+from app.services.storage.minio_client import put_bytes, storage_enabled
 from app.services.ingest.summarizer import (
     fallback_summary,
     fast_summary,
@@ -545,61 +540,75 @@ async def archive_index_snapshot(
         logger.warning("索引产物归档失败（不影响任务成败）：%s", e)
 
 
-REPO_ARCHIVE_KEEP = 3
+async def archive_repo_bundle(project_id, repo_dir: Path, stats: dict) -> None:
+    """源码 bundle 归档到 MinIO（M16 D3）：git bundle create --all，固定 key 覆盖写。
 
-
-def repo_archive_key(project_id, commit_sha) -> str:
-    return f"repo-archives/{project_id}/{commit_sha}.tar.gz"
-
-
-async def archive_repo_tarball(project_id, repo_dir: Path, commit_sha, stats) -> None:
-    """源码归档到 MinIO：git archive 打 HEAD 的工作树（不含 .git），每项目留最近 3 份。
-
-    这不是把工作副本搬走——repos 本地盘照旧是唯一的干活目录。归档的价值：
-    项目删除/本地清理后仍可回溯"当次问答依据的源码"，将来多机 worker 也能
-    从这里取码。同 commit 重复索引 key 相同，覆盖无害。
-    与快照归档同一条纪律：失败只记 warning，绝不反噬任务成败。
+    M16 起 bundle 是这个项目源码的**主存储**——本地工作区任务一结束就删了。
+    但纪律没变：上传失败只记 warning、绝不反噬任务成败。真丢了也不是死局，
+    下次任务的容错链会退回直接 clone 远端，然后重新生成 bundle。
     """
     if not storage_enabled():
         return
-    key = repo_archive_key(project_id, commit_sha)
-    tmp = None
     try:
-        # 同 commit 已归档过（含无变化秒回的反复触发）：只回填 key，不重复打包上传
-        if any(k == key for k, _ in await asyncio.to_thread(list_keys, key)):
-            stats["repo_archive_key"] = key
-            return
-        fd, tmp = await asyncio.to_thread(
-            tempfile.mkstemp, suffix=".tar.gz", prefix="repo-archive-"
-        )
-        os.close(fd)
-        await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(repo_dir), "archive", "--format=tar.gz", "-o", tmp, "HEAD"],
-            check=True,
-            capture_output=True,
-        )
-        await asyncio.to_thread(upload_file, key, tmp, "application/gzip")
-        stats["repo_archive_key"] = key
-
-        # 保留策略：按对象时间倒序留 3 份，防止归档无限膨胀
-        existing = await asyncio.to_thread(list_keys, f"repo-archives/{project_id}/")
-        stale = sorted(existing, key=lambda kv: kv[1], reverse=True)[REPO_ARCHIVE_KEEP:]
-        for old_key, _ in stale:
-            await asyncio.to_thread(remove_key, old_key)
+        key = await asyncio.to_thread(export_bundle, str(project_id), repo_dir)
+        if key:
+            stats["repo_bundle_key"] = key
     except Exception as e:  # noqa: BLE001 — 非关键路径，绝不反噬任务成败
-        stats["repo_archive_warning"] = f"源码归档失败：{type(e).__name__}: {e}"
-        logger.warning("源码 tarball 归档失败（不影响任务成败）：%s", e)
-    finally:
-        if tmp:
-            await asyncio.to_thread(_unlink_quiet, tmp)
+        stats["repo_bundle_warning"] = f"源码 bundle 归档失败：{type(e).__name__}: {e}"
+        logger.warning("源码 bundle 归档失败（不影响任务成败）：%s", e)
 
 
-def _unlink_quiet(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+WORKDIR_PREFIX_SEP = "-"
+
+
+def cleanup_stale_workdirs() -> int:
+    """清扫上一次进程留下的临时工作区，返回清掉的个数。
+
+    正常路径由 run_index_job 的 finally 负责清理，但 worker 被 OOM kill（M13 明确
+    预期这种情形：超限被杀 + compose 拉起 + 任务重投）时 finally 根本不会执行，
+    残留目录会一直堆在盘上——那正好戳穿 M16 "本地持久占用归零"的立身之本。
+
+    调用点选在**进程启动**：worker 是 concurrency=1，子进程初始化时手上没有在跑的
+    任务；关掉队列时 API 进程启动同理。所以这里可以放心整个删，不必猜哪个还活着。
+    """
+    root = settings.repos_dir
+    if not root.exists():
+        return 0
+    removed = 0
+    for child in root.iterdir():
+        if not child.is_dir() or WORKDIR_PREFIX_SEP not in child.name:
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed += 1
+    if removed:
+        logger.warning("清理了 %d 个上次残留的索引工作区", removed)
+    return removed
+
+
+async def remote_unchanged(
+    *, mode: str, depth: str, current_depth: str,
+    last_indexed_commit: str | None, remote_head: str | None, project_id: str,
+) -> bool:
+    """ls-remote 秒回判定（M16 D1）。
+
+    秒回从 build_index_plan 里前移到了"建工作区之前"，所以那边所有**强制全量**的
+    前置条件必须在这里逐条复刻——漏一条就会出现"图被清空了/换了嵌入模型/用户点了
+    强制全量，却因为远端没有新提交而秒回、什么活都没干"。
+    """
+    if not remote_head or not last_indexed_commit or remote_head != last_indexed_commit:
+        return False
+    if mode == MODE_FULL:
+        return False        # 强制全量是增量出问题时的逃生门，不能被秒回吃掉
+    if depth == IndexDepth.DEEP and current_depth == IndexDepth.FAST:
+        return False        # fast → deep 补跑要全量重写 L2/L3 摘要
+    meta = await load_project_index_meta(project_id)
+    if not meta:
+        return False        # 图里没有这个项目（被清理过 / M4 前的老数据）
+    # 换了嵌入模型必须全量重嵌入，不能因为代码没变就跳过
+    return (
+        meta.get("embedding_model") == settings.embedding_model
+        and meta.get("embedding_dim") == settings.embedding_dim
+    )
 
 
 async def run_index_job(
@@ -609,6 +618,7 @@ async def run_index_job(
     depth: str = IndexDepth.DEEP,
 ) -> None:
     pid = str(project_id)
+    workdir: Path | None = None
     try:
         async with SessionLocal() as session:
             project = await session.get(Project, project_id)
@@ -625,8 +635,33 @@ async def run_index_job(
 
         # ---- clone (0-10) ----
         await _update_job(job_id, stage=JobStage.CLONE, progress=0)
-        repo_dir = settings.repos_dir / pid
-        commit_sha = await asyncio.to_thread(pull_repo, git_url, repo_dir, token, branch)
+        # M16 D1：秒回前移——一次 ls-remote 就能判定，不拉 bundle 也不建工作区
+        remote_head = await asyncio.to_thread(ls_remote_head, git_url, branch, token)
+        if await remote_unchanged(
+            mode=mode, depth=depth, current_depth=current_depth,
+            last_indexed_commit=last_indexed_commit,
+            remote_head=remote_head, project_id=pid,
+        ):
+            await _update_job(
+                job_id, kind=MODE_INCREMENTAL, progress=95,
+                stats_json={"mode": MODE_INCREMENTAL, "no_changes": True,
+                            "no_changes_source": "ls-remote"},
+            )
+            await _finish(job_id, project_id, commit_sha=remote_head)
+            logger.info("项目 %s 远端无新提交，秒回（未建工作区）", name)
+            return
+
+        # M16 D4：每任务独立临时工作区，finally 必清。repos_dir 只当临时根用
+        settings.repos_dir.mkdir(parents=True, exist_ok=True)
+        workdir = Path(
+            await asyncio.to_thread(
+                tempfile.mkdtemp, dir=str(settings.repos_dir), prefix=f"{pid}-"
+            )
+        )
+        repo_dir = workdir
+        commit_sha, code_source = await asyncio.to_thread(
+            restore_workdir, pid, git_url, repo_dir, token, branch
+        )
         await _update_job(job_id, progress=10)
 
         # ---- parse (10-25)：分块 + IMPORTS + 路由 + 归属 ----
@@ -643,12 +678,12 @@ async def run_index_job(
 
         if plan.no_changes:
             # spec: 无变更秒级返回，不动图与报告
+            # spec「无变化不动存储」：这条路只可能是"commit 变了但没有文件变更"
+            # （空提交/纯 mode 变更）。bundle 不更新无害——下次 fetch 会自愈
             nc_stats = {
                 "mode": MODE_INCREMENTAL, "no_changes": True,
-                "files_parsed": len(walk.files),
+                "files_parsed": len(walk.files), "code_source": code_source,
             }
-            # 归档也要跟上：该 commit 若已归档过，这里只是一次存在性检查
-            await archive_repo_tarball(pid, repo_dir, commit_sha, nc_stats)
             await _update_job(job_id, progress=95, stats_json=nc_stats)
             await _finish(job_id, project_id, commit_sha=commit_sha)
             logger.info("项目 %s 无变更，跳过重索引", name)
@@ -687,6 +722,7 @@ async def run_index_job(
         stats = {
             "mode": plan.mode,
             "depth": depth,
+            "code_source": code_source,   # bundle 恢复还是 clone 远端（M16 容错链可观测）
             "files_parsed": len(files),
             "files_skipped": walk.skipped + parse_failed,
             "chunks": len(chunks),
@@ -844,7 +880,7 @@ async def run_index_job(
         await archive_index_snapshot(
             job_id, pid, name, commit_sha, stats, files, chunks, modules_info
         )
-        await archive_repo_tarball(pid, repo_dir, commit_sha, stats)
+        await archive_repo_bundle(pid, repo_dir, stats)
         await _update_job(job_id, stats_json=stats)
 
         await _finish(job_id, project_id, commit_sha=commit_sha, depth=depth)
@@ -858,6 +894,10 @@ async def run_index_job(
     except Exception as e:  # noqa: BLE001 — 管道兜底，任何失败都要落库
         logger.exception("索引任务失败")
         await _finish(job_id, project_id, error=f"索引失败：{type(e).__name__}: {e}")
+    finally:
+        # M16 D4：成败都清。本地盘不再是源码的持久层，留下来只会白占磁盘
+        if workdir is not None:
+            await asyncio.to_thread(shutil.rmtree, workdir, ignore_errors=True)
 
 
 class TaskQueueUnavailable(RuntimeError):

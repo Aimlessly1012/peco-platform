@@ -1,9 +1,8 @@
 """MinIO 对象存储封装（M13 D5）。
 
-只承担三类非关键路径产物：①理解报告导出件 ②索引完成后的解析产物快照
-③每次成功索引的源码 tarball 归档（git archive，不含 .git）。
-仓库工作副本一律留在本地盘——git pull 与 tree-sitter 必须真实文件系统；
-MinIO 里存的是快照归档，不是工作存储。
+承担三类对象：①理解报告导出件 ②索引完成后的解析产物快照（以上非关键路径）
+③**源码 git bundle**——M16 起它是每个项目源码的唯一持久层，本地盘只剩任务级
+临时工作区。bundle 上传失败仍只记 warning：下次任务的容错链会退回 clone 远端。
 
 MINIO_ACCESS_KEY 为空 = 整个模块 no-op（返回 None），调用方不必写分支判断；
 这也是本地开发和不想跑 MinIO 的部署形态的默认状态。
@@ -114,6 +113,23 @@ def upload_file(
         ensure_bucket()
     client.fput_object(settings.minio_bucket, key, file_path, content_type=content_type)
     return key
+
+
+def download_file(key: str, dest_path: str) -> bool:
+    """把对象下载到本地文件。存在并下载成功返回 True。
+
+    未启用、对象不存在、MinIO 不可达一律返回 False 而不抛——调用方（bundle 恢复）
+    对这三种情况的处理完全一样：退回直接 clone 远端。
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.fget_object(settings.minio_bucket, key, dest_path)
+        return True
+    except Exception as e:  # noqa: BLE001 — 见 docstring
+        logger.info("对象不可用（%s）：%s", key, e)
+        return False
 
 
 def list_keys(prefix: str) -> list[tuple[str, object]]:

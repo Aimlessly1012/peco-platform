@@ -133,3 +133,12 @@ worker 服务有自己的 `build: ./backend` 段，compose 给它**独立命名�
 `build backend` 不会更新它——worker 会一直跑旧代码，且 `up -d worker`
 /`--force-recreate` 都只是用旧镜像重建容器，毫无提示。
 **部署后端代码的标准动作**：`build backend worker` 两个都点名，再 `up -d backend worker`。
+
+## M16 源码 bundle 主存储（2026-08-28）
+
+- MinIO 是源码唯一持久层：`repo-bundles/{project_id}.bundle`（git bundle 全史，固定 key 覆盖写）。
+  本地 `data/repos/` 只是任务级临时根，任务尾 finally 清理；worker 启动时兜底清扫孤儿工作区
+  （OOM kill 时 finally 不执行）。tarball 归档（repo-archives/）已退役并清空。
+- 取码优先级：ls-remote 秒回 → bundle 恢复 + fetch 增量 → 任一环失败 fallback clone 远端。
+  线上全链路实测过（`code_source` 字段区分 clone/bundle）。
+- compose 的 repos 卷暂保留（观察一周后单独移除）；缓存实证：全量重跑摘要 40/41、嵌入 151/152 命中。

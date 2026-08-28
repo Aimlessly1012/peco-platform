@@ -101,6 +101,11 @@ async def lifespan(app: FastAPI):
     check_secret_key()  # M8：默认/过短的 SECRET_KEY 会让登录态可伪造
     await _recover_stale_jobs()
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
+    if not settings.task_queue_enabled:
+        # 队列开着时索引跑在 worker 里，工作区归它扫；这里扫会误删它正在用的目录
+        from app.services.ingest.pipeline import cleanup_stale_workdirs
+
+        cleanup_stale_workdirs()
     await asyncio.to_thread(ensure_bucket_quietly)  # M13：MinIO 桶（非关键路径）
     consumer = await _start_progress_consumer()
     try:

@@ -46,8 +46,12 @@ def _install_progress_mirror(**_kwargs) -> None:
     """
     from app.services.ingest.progress_transport import install_worker_mirror
 
-    # 仓库副本目录由 API 进程在 lifespan 里建；worker 是独立容器，自己也得兜一手
+    # 临时工作区的根目录由 API 进程在 lifespan 里建；worker 是独立容器，自己也得兜一手
     settings.repos_dir.mkdir(parents=True, exist_ok=True)
+    # M16：上次被 OOM kill 的任务不会走到 finally，残留工作区在这里扫掉
+    from app.services.ingest.pipeline import cleanup_stale_workdirs
+
+    cleanup_stale_workdirs()
     install_worker_mirror()
 
 

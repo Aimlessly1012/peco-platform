@@ -230,7 +230,11 @@ async def test_deleted_file_leaves_no_residue(indexing_env):
 
 
 async def test_no_changes_returns_fast_without_touching_graph(indexing_env):
-    """spec 场景: 无变更时秒级 succeeded，图不发生写操作。"""
+    """spec 场景: 无变更时秒级 succeeded，图不发生写操作。
+
+    M16 起这条路由 ls-remote 判定，连工作区都不建——所以 stats 里不再有
+    files_parsed（没走 walk），换成 no_changes_source 标明是哪一层判出来的。
+    """
     pid = await indexing_env["new_project"]()
     await indexing_env["run"](pid, MODE_FULL)
     before = await snapshot(str(pid))
@@ -239,8 +243,7 @@ async def test_no_changes_returns_fast_without_touching_graph(indexing_env):
 
     assert job.status == "succeeded"
     assert job.stats_json == {
-        "mode": "incremental", "no_changes": True,
-        "files_parsed": job.stats_json["files_parsed"],
+        "mode": "incremental", "no_changes": True, "no_changes_source": "ls-remote",
     }
     assert await snapshot(str(pid)) == before
 
