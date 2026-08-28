@@ -565,6 +565,10 @@ async def archive_repo_tarball(project_id, repo_dir: Path, commit_sha, stats) ->
     key = repo_archive_key(project_id, commit_sha)
     tmp = None
     try:
+        # 同 commit 已归档过（含无变化秒回的反复触发）：只回填 key，不重复打包上传
+        if any(k == key for k, _ in await asyncio.to_thread(list_keys, key)):
+            stats["repo_archive_key"] = key
+            return
         fd, tmp = await asyncio.to_thread(
             tempfile.mkstemp, suffix=".tar.gz", prefix="repo-archive-"
         )
@@ -639,13 +643,13 @@ async def run_index_job(
 
         if plan.no_changes:
             # spec: 无变更秒级返回，不动图与报告
-            await _update_job(
-                job_id, progress=95,
-                stats_json={
-                    "mode": MODE_INCREMENTAL, "no_changes": True,
-                    "files_parsed": len(walk.files),
-                },
-            )
+            nc_stats = {
+                "mode": MODE_INCREMENTAL, "no_changes": True,
+                "files_parsed": len(walk.files),
+            }
+            # 归档也要跟上：该 commit 若已归档过，这里只是一次存在性检查
+            await archive_repo_tarball(pid, repo_dir, commit_sha, nc_stats)
+            await _update_job(job_id, progress=95, stats_json=nc_stats)
             await _finish(job_id, project_id, commit_sha=commit_sha)
             logger.info("项目 %s 无变更，跳过重索引", name)
             return

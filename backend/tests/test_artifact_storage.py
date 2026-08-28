@@ -361,3 +361,18 @@ async def test_repo_tarball_failure_is_warning(tmp_path, monkeypatch):
     await pipeline.archive_repo_tarball("p", tmp_path / "not-a-repo", "sha", stats)
     assert "repo_archive_warning" in stats
     assert "repo_archive_key" not in stats
+
+
+async def test_repo_tarball_skips_existing(tmp_path, monkeypatch):
+    """同 commit 已归档：只回填 key，不再打包上传。"""
+    from app.services.ingest import pipeline
+
+    key = "repo-archives/p/sha1.tar.gz"
+    uploads = []
+    monkeypatch.setattr(pipeline, "storage_enabled", lambda: True)
+    monkeypatch.setattr(pipeline, "list_keys", lambda prefix: [(key, 1)])
+    monkeypatch.setattr(pipeline, "upload_file", lambda *a, **k: uploads.append(a))
+    stats = {}
+    await pipeline.archive_repo_tarball("p", tmp_path, "sha1", stats)
+    assert stats["repo_archive_key"] == key
+    assert uploads == []
