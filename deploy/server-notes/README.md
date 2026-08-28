@@ -125,3 +125,11 @@ location / {
 - 线上验证过：临时调 LIMIT=2 → capacity accepting=false、创建 409 带原因、不落库；调回即恢复。
 - **docker-compose.server.yml 已纳入 git 仓库**：它曾是服务器专有文件，2026-08-26 部署时被
   rsync --delete 误删（本文件早前记载的坑第二次咬人）。文件无秘密，入库后 rsync 自然携带。
+
+## worker 镜像的部署坑（2026-08-26 实锤）
+
+worker 服务有自己的 `build: ./backend` 段，compose 给它**独立命名镜像**
+`rag_coder-worker`（与 `rag_coder-backend` 是两个镜像）。只
+`build backend` 不会更新它——worker 会一直跑旧代码，且 `up -d worker`
+/`--force-recreate` 都只是用旧镜像重建容器，毫无提示。
+**部署后端代码的标准动作**：`build backend worker` 两个都点名，再 `up -d backend worker`。
