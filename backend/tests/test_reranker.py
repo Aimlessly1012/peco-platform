@@ -252,21 +252,29 @@ def search_stub(monkeypatch):
     async def fake_embed_query(text):
         return [0.1, 0.2]
 
-    async def fake_vector_query(index, vec, project_id, k):
-        # 每路返回足量候选，实际条数由 _rrf_merge 的 top_k 决定
+    async def fake_vector_route(index_name, vec, project_id, k, query=""):
+        # 每路返回足量候选（刻意不按 k 截断），实际条数由 RRF 的 top_k 决定
+        from app.services.retrieval.models import chunk_item, file_item, module_item
+        from app.services.retrieval.vector_store import (
+            CHUNK_INDEX, FILE_INDEX, MODULE_INDEX,
+        )
+
+        build = {CHUNK_INDEX: chunk_item, FILE_INDEX: file_item,
+                 MODULE_INDEX: module_item}[index_name]
         return [
-            {"node": {"name": f"n{i}", "file_path": f"src/f{i}.py", "symbol": f"fn{i}",
-                      "symbol_type": "function", "start_line": 1, "end_line": 9,
-                      "code": f"code {i}"},
-             "score": 1.0 / (i + 1)}
+            build({"name": f"n{i}", "file_path": f"src/f{i}.py", "symbol": f"fn{i}",
+                   "symbol_type": "function", "start_line": 1, "end_line": 9,
+                   "code": f"code {i}"}, 1.0 / (i + 1))
             for i in range(40)
         ]
 
     async def fake_expand(project_id, ids):
         return state["expanded"]
 
-    monkeypatch.setattr(service.embedder, "embed_query", fake_embed_query)
-    monkeypatch.setattr(service, "_vector_query", fake_vector_query)
+    # M15：接缝从 service._vector_query 移到 vector_store.vector_route（组件层），
+    # 断言一字未动——测的是 RRF → rerank → 图扩展这条链路的行为
+    monkeypatch.setattr(service, "embed_query", fake_embed_query)
+    monkeypatch.setattr(service, "vector_route", fake_vector_route)
     monkeypatch.setattr(service, "expand_one_hop", fake_expand)
     return state
 

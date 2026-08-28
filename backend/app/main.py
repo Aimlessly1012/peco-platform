@@ -17,6 +17,7 @@ from app.mcp_server.auth import MCPAuthMiddleware
 from app.mcp_server.server import mcp, mcp_http_app
 from app.models.tables import IndexJob, JobStatus, Project, ProjectStatus
 from app.services.auth.bootstrap import check_secret_key
+from app.services.retrieval.vector_store import reset_stores
 from app.services.storage.minio_client import ensure_bucket_quietly
 
 logging.basicConfig(level=logging.INFO)
@@ -111,6 +112,8 @@ async def lifespan(app: FastAPI):
     finally:
         if consumer is not None:
             await consumer.aclose()
+        # M15：Neo4jVector 用的是自己的同步驱动，async close_driver() 关不到它
+        reset_stores()
         await close_driver()
 
 

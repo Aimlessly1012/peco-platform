@@ -42,6 +42,28 @@ def fake_embedder(monkeypatch):
 
     monkeypatch.setattr(type(embedder_module.embedder), "embed_texts", embed_texts)
     monkeypatch.setattr(type(embedder_module.embedder), "embed_query", embed_query)
+
+    # M15：检索侧改走 LangChain Embeddings 组件（vector_store.retrieval_embeddings），
+    # 同一份确定性假向量必须也覆盖到它——否则集成测试会真的去打嵌入 API。
+    # 打在组件工厂上而不是 embed_query 函数上：service 是 from-import 绑定的，
+    # 补在工厂这层无论谁引用都生效。
+    class FakeEmbeddings:
+        def embed_query(self, text):
+            return fake_embed(text)
+
+        def embed_documents(self, texts):
+            return [fake_embed(t) for t in texts]
+
+        async def aembed_query(self, text):
+            return fake_embed(text)
+
+        async def aembed_documents(self, texts):
+            return [fake_embed(t) for t in texts]
+
+    monkeypatch.setattr(
+        "app.services.retrieval.vector_store.retrieval_embeddings",
+        lambda: FakeEmbeddings(),
+    )
     return embedder_module.embedder
 
 

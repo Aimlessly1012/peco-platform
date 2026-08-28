@@ -1,224 +1,38 @@
-"""分层混合检索（M2）：module/file/chunk 三路向量 + RRF 融合 + 图扩展一跳。
+"""分层混合检索（M2 → M15）：module/file/chunk 三路向量 + RRF 融合 + 图扩展一跳。
 
-独立于聊天 API（spec: 检索服务层独立可调用，后续 MCP 复用）。
+独立于聊天 API（spec: 检索服务层独立可调用，MCP 复用同一入口）。
+
+M15 起本模块只做**编排**，三段实现各归其位：
+    vector_store.py     三路 Neo4jVector（LangChain 组件 + retrieval_query 插槽）
+    components.py       RRF 融合与 rerank（当代 1.x 风格自持组件，不引 classic）
+    graph_expansion.py  跨路/跨阶段的图扩展（明确标注的外挂 Cypher，见该模块注释）
+
+检索算法本身一点没动：三路 → RRF → （非 impact 时）精排 → 图扩展一跳追加。
 """
-from dataclasses import dataclass, field
-
 from app.core.config import settings
-from app.graph.client import get_driver
-from app.services.ingest.embedder import embedder
 from app.services.retrieval import reranker
+from app.services.retrieval.components import rrf_fuser, rerank_compressor
+from app.services.retrieval.graph_expansion import (
+    expand_one_hop,
+    get_project_summary,
+    representative_chunks,
+)
+from app.services.retrieval.models import RetrievedItem
+from app.services.retrieval.vector_store import (
+    CHUNK_INDEX,
+    FILE_INDEX,
+    MODULE_INDEX,
+    embed_query,
+    vector_route,
+)
+from app.graph.client import get_driver
 
-RRF_K = 60
-
-
-@dataclass
-class RetrievedItem:
-    kind: str            # chunk | file_summary | module_summary
-    node_id: str
-    file_path: str       # module_summary 时为空串
-    symbol: str
-    symbol_type: str
-    start_line: int
-    end_line: int
-    content: str         # 代码或摘要文本
-    score: float
-    via_edge: str | None = None  # None=直接命中；defines_file/calls_api/imports=关联带出
-
-    def citation(self) -> dict:
-        """出处条目。顺序与提示词里的「资料 N」编号一一对应（N = 下标 + 1），
-        答案中的 [n] 上标即按此定位，因此关联带出项也必须在列，不能过滤。"""
-        return {
-            "file_path": self.file_path or f"[模块] {self.symbol}",
-            "start_line": self.start_line,
-            "end_line": self.end_line,
-            "node_id": self.node_id,
-            "symbol": self.symbol,
-            "kind": self.kind,          # chunk / file_summary / module_summary
-            "via_edge": self.via_edge,  # None=直接命中；其余为关联带出的边类型
-        }
-
-
-async def _vector_query(
-    index: str, vec: list[float], project_id: str, k: int
-) -> list[dict]:
-    driver = get_driver()
-    async with driver.session() as session:
-        # 向量索引不支持 pre-filter：over-fetch 4x 后按 project_id 过滤
-        result = await session.run(
-            f"""
-            CALL db.index.vector.queryNodes('{index}', $fetch_k, $vec)
-            YIELD node, score
-            WHERE node.project_id = $pid
-            RETURN node, score LIMIT $k
-            """,
-            fetch_k=k * 4, vec=vec, pid=project_id, k=k,
-        )
-        return [{"node": dict(r["node"]), "score": r["score"]} async for r in result]
-
-
-def _chunk_item(props: dict, score: float, via: str | None = None) -> RetrievedItem:
-    return RetrievedItem(
-        kind="chunk",
-        node_id=props.get("name", ""),
-        file_path=props.get("file_path", ""),
-        symbol=props.get("symbol", ""),
-        symbol_type=props.get("symbol_type", ""),
-        start_line=props.get("start_line", 0),
-        end_line=props.get("end_line", 0),
-        content=props.get("code", ""),
-        score=score,
-        via_edge=via,
-    )
-
-
-def _file_item(props: dict, score: float, via: str | None = None) -> RetrievedItem:
-    return RetrievedItem(
-        kind="file_summary",
-        node_id=props.get("name", ""),
-        file_path=props.get("path", ""),
-        symbol="(file)",
-        symbol_type="file",
-        start_line=0,
-        end_line=0,
-        content=props.get("summary", ""),
-        score=score,
-        via_edge=via,
-    )
-
-
-def _module_item(props: dict, score: float) -> RetrievedItem:
-    return RetrievedItem(
-        kind="module_summary",
-        node_id=props.get("name", ""),
-        file_path="",
-        symbol=props.get("module_name") or props.get("name", "").split(":module:")[-1],
-        symbol_type="module",
-        start_line=0,
-        end_line=0,
-        content=props.get("summary", ""),
-        score=score,
-    )
-
-
-def _rrf_merge(routes: list[list[RetrievedItem]], top_k: int) -> list[RetrievedItem]:
-    scores: dict[str, float] = {}
-    items: dict[str, RetrievedItem] = {}
-    for route in routes:
-        for rank, item in enumerate(route):
-            scores[item.node_id] = scores.get(item.node_id, 0.0) + 1.0 / (RRF_K + rank + 1)
-            if item.node_id not in items:
-                items[item.node_id] = item
-    merged = sorted(items.values(), key=lambda i: scores[i.node_id], reverse=True)
-    for item in merged:
-        item.score = scores[item.node_id]
-    return merged[:top_k]
-
-
-async def _representative_chunks(
-    project_id: str, file_node_ids: list[str], per_file: int = 2
-) -> list[RetrievedItem]:
-    """摘要层命中的文件 → 沿 DEFINES 取前几个代表块下钻。"""
-    if not file_node_ids:
-        return []
-    driver = get_driver()
-    async with driver.session() as session:
-        result = await session.run(
-            """
-            MATCH (f:File)-[:DEFINES]->(c:Chunk)
-            WHERE f.name IN $ids AND f.project_id = $pid
-            WITH f, c ORDER BY c.start_line
-            WITH f, collect(c)[0..$per_file] AS reps
-            UNWIND reps AS chunk
-            RETURN chunk
-            """,
-            ids=file_node_ids, pid=project_id, per_file=per_file,
-        )
-        return [_chunk_item(dict(r["chunk"]), 0.0, via="defines_file") async for r in result]
-
-
-async def expand_one_hop(
-    project_id: str, chunk_node_ids: list[str]
-) -> list[RetrievedItem]:
-    """图扩展一跳（设计 D6）：所属文件 L2 / CALLS_API 对端 / IMPORTS 目标 L2。"""
-    if not chunk_node_ids:
-        return []
-    driver = get_driver()
-    expanded: list[RetrievedItem] = []
-    async with driver.session() as session:
-        result = await session.run(
-            """
-            MATCH (c:Chunk)<-[:DEFINES]-(f:File)
-            WHERE c.name IN $ids AND c.project_id = $pid
-            RETURN DISTINCT f
-            """,
-            ids=chunk_node_ids, pid=project_id,
-        )
-        expanded.extend([_file_item(dict(r["f"]), 0.0, via="defines_file") async for r in result])
-
-        result = await session.run(
-            """
-            MATCH (c:Chunk)-[:CALLS_API]-(other:Chunk)
-            WHERE c.name IN $ids AND c.project_id = $pid
-            RETURN DISTINCT other
-            """,
-            ids=chunk_node_ids, pid=project_id,
-        )
-        expanded.extend([_chunk_item(dict(r["other"]), 0.0, via="calls_api") async for r in result])
-
-        result = await session.run(
-            """
-            MATCH (c:Chunk)<-[:DEFINES]-(:File)-[:IMPORTS]->(t:File)
-            WHERE c.name IN $ids AND c.project_id = $pid
-            RETURN DISTINCT t LIMIT 6
-            """,
-            ids=chunk_node_ids, pid=project_id,
-        )
-        expanded.extend([_file_item(dict(r["t"]), 0.0, via="imports") async for r in result])
-    return expanded
-
-
-async def get_project_summary(project_id: str) -> str:
-    driver = get_driver()
-    async with driver.session() as session:
-        result = await session.run(
-            "MATCH (p:Project {project_id: $pid}) RETURN p.summary AS s LIMIT 1",
-            pid=project_id,
-        )
-        record = await result.single()
-        return (record and record["s"]) or ""
-
-
-def _rerank_document(item: RetrievedItem) -> str:
-    """送去精排的文档文本：chunk 是代码、摘要节点是摘要（D2）。
-
-    带上文件路径与符号名作头——纯代码片段常常看不出它属于什么业务，
-    重排模型拿到定位信息判得更准。
-    """
-    head = item.file_path or item.symbol
-    if item.symbol and item.symbol not in ("(file)", head):
-        head = f"{head} :: {item.symbol}"
-    body = item.content or ""
-    return f"{head}\n{body}" if head else body
-
-
-async def _apply_rerank(
-    query: str, items: list[RetrievedItem], final_k: int
-) -> list[RetrievedItem]:
-    """RRF 候选池 → 重排取 final_k。失败时保持 RRF 顺序（D2 降级）。"""
-    if not items:
-        return items
-    ranking = await reranker.rerank(
-        query, [_rerank_document(item) for item in items], top_n=final_k
-    )
-    if ranking is None:
-        return items[:final_k]
-    reordered: list[RetrievedItem] = []
-    for index, score in ranking[:final_k]:
-        item = items[index]
-        item.score = score      # 分数改由重排模型给出，前端引用排序随之一致
-        reordered.append(item)
-    return reordered
+# 对外保持 M14 的导入面：workflow / MCP / 测试都从本模块拿这些名字
+__all__ = [
+    "RetrievedItem", "search_layered", "search_chunks", "expand_one_hop",
+    "get_project_summary", "impact_of", "format_impact_context",
+    "MAX_IMPACT_DEPTH", "MAX_IMPACT_RESULTS",
+]
 
 
 async def search_layered(
@@ -231,38 +45,30 @@ async def search_layered(
     不该被文本相关性挤掉，所以精排只收敛主候选。impact 模式按图距离排序，不走精排。
     """
     k = top_k or settings.retrieval_top_k
-    vec = await embedder.embed_query(query)
+    vec = await embed_query(query)
     # impact 的检索只用来定位目标文件，排序语义是图距离（D2）
     use_rerank = reranker.is_enabled() and question_type != "impact"
 
     if question_type == "global":
-        module_hits = await _vector_query("module_summary_embedding", vec, project_id, 4)
-        file_hits = await _vector_query("file_summary_embedding", vec, project_id, 6)
-        chunk_hits = await _vector_query("chunk_embedding", vec, project_id, k // 2)
-        reps = await _representative_chunks(
-            project_id, [h["node"].get("name", "") for h in file_hits[:4]]
+        modules = await vector_route(MODULE_INDEX, vec, project_id, 4, query)
+        files = await vector_route(FILE_INDEX, vec, project_id, 6, query)
+        chunks = await vector_route(CHUNK_INDEX, vec, project_id, k // 2, query)
+        reps = await representative_chunks(
+            project_id, [f.node_id for f in files[:4]]
         )
-        routes = [
-            [_module_item(h["node"], h["score"]) for h in module_hits],
-            [_file_item(h["node"], h["score"]) for h in file_hits],
-            [_chunk_item(h["node"], h["score"]) for h in chunk_hits] + reps,
-        ]
+        routes = [modules, files, chunks + reps]
         final_k = k + 4
-        pool = final_k * settings.rerank_candidate_multiplier if use_rerank else final_k
-        merged = _rrf_merge(routes, top_k=pool)
     else:
-        chunk_hits = await _vector_query("chunk_embedding", vec, project_id, k)
-        file_hits = await _vector_query("file_summary_embedding", vec, project_id, max(2, k // 3))
-        routes = [
-            [_chunk_item(h["node"], h["score"]) for h in chunk_hits],
-            [_file_item(h["node"], h["score"]) for h in file_hits],
-        ]
+        chunks = await vector_route(CHUNK_INDEX, vec, project_id, k, query)
+        files = await vector_route(FILE_INDEX, vec, project_id, max(2, k // 3), query)
+        routes = [chunks, files]
         final_k = k
-        pool = final_k * settings.rerank_candidate_multiplier if use_rerank else final_k
-        merged = _rrf_merge(routes, top_k=pool)
+
+    pool = final_k * settings.rerank_candidate_multiplier if use_rerank else final_k
+    merged = rrf_fuser.fuse(routes, top_k=pool)
 
     if use_rerank:
-        merged = await _apply_rerank(query, merged, final_k)
+        merged = await rerank_compressor.compress(query, merged, final_k)
 
     # 图扩展一跳（直接命中的 chunk）
     hit_chunk_ids = [i.node_id for i in merged if i.kind == "chunk" and i.via_edge is None]
