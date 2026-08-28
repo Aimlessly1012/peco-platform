@@ -6,7 +6,7 @@
 ## Requirements
 
 ### Requirement: 仓库拉取
-索引任务的 clone 阶段 SHALL 将仓库 clone 至 `data/repos/<project_id>/`（已存在则 fetch+reset 到目标分支最新），私有仓使用解密后的 token 组装认证 URL。拉取失败（认证/网络/仓库不存在）时任务 MUST 置为 failed 并记录可读的 error_text。任务成功结束时 SHALL 记录 `last_indexed_commit`。
+索引任务的取码阶段 SHALL 在任务级临时工作区内获得目标分支最新代码：优先从 MinIO bundle 恢复并 fetch 增量，bundle 不可用时 clone 远端（M16）；私有仓使用解密后的 token 组装认证 URL，错误信息 MUST 不含 token。取码彻底失败（认证/网络/仓库不存在）时任务 MUST 置为 failed 并记录可读的 error_text。任务成功结束时 SHALL 记录 `last_indexed_commit`。
 
 #### Scenario: 私有仓 token 无效
 - **WHEN** clone 阶段认证失败
@@ -170,3 +170,32 @@ LLM 摘要与嵌入的单次调用 MUST 设置显式超时（环境变量可配�
 #### Scenario: fast 升级 deep 只补差价
 - **WHEN** fast 索引过的项目在无代码变更时以 depth=deep 触发 auto 索引
 - **THEN** 嵌入全部缓存复用，仅产生 LLM 摘要与报告生成调用，完成后报告为完整深度版
+
+### Requirement: 重启恢复语义
+索引任务 SHALL 在执行进程重启后自动恢复执行（经任务队列重投递），并利用增量语义快速跳过已完成部分；系统 SHALL NOT 将中断任务标记为 failed 后等待人工重新触发。
+
+#### Scenario: 中断任务自动续跑
+- **WHEN** 索引任务执行到 embed 阶段时执行进程重启
+- **THEN** 任务自动重新执行，已入库的摘要与向量经缓存/增量判定快速跳过，最终 succeeded
+
+#### Scenario: 前端无感知差异
+- **WHEN** 任务因重启被重投递
+- **THEN** 前端 SSE 收到的进度事件结构与正常执行一致，无需专门处理重启态
+
+### Requirement: 任务级临时工作区
+索引任务 SHALL 在每任务独立的临时目录中工作，任务结束（无论成败）SHALL 清理该目录；本地磁盘 SHALL NOT 作为源码的跨任务持久存储。工作区来源优先级：MinIO bundle 恢复 + 远端 fetch 增量；bundle 不可用时直接 clone 远端（容错，不使任务失败）。
+
+#### Scenario: 本地无任何副本时索引成功
+- **WHEN** 本地磁盘无该项目任何数据（含 bundle 恢复失败的情形）
+- **THEN** 任务经 clone 远端完成索引，且结束后本地不残留工作区
+
+#### Scenario: bundle 恢复保全增量
+- **WHEN** MinIO 有该项目 bundle 且远端有新 commit
+- **THEN** 任务经 bundle 恢复 + fetch 增量后，增量索引的 git diff 判定照常生效
+
+### Requirement: 无变化检测前移
+任务开头 SHALL 以 git ls-remote 查询远端 HEAD；与基准 commit 一致时 SHALL 秒级返回，SHALL NOT 拉取 bundle 或 clone。
+
+#### Scenario: 无变化不动存储
+- **WHEN** 远端 HEAD 与 last_indexed_commit 相同
+- **THEN** 任务秒级 succeeded，无 bundle 下载与本地工作区创建
