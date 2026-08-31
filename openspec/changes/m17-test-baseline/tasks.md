@@ -15,7 +15,7 @@
 
 - [x] 2.1 新增 `.github/workflows/ci.yml`：unit job（push+PR，uv 环境，`-m "not integration"` + 覆盖率门槛 + 超时）
 - [x] 2.2 同工作流 integration job（main push 触发；service 容器起 Neo4j 5.26-community（NEO4J_PLUGINS=apoc）与 MinIO，健康检查就绪后跑 `-m integration`）
-- [ ] 2.3 推送验证两 job 真实绿灯；故意引入一个失败提交验证红灯可见后还原
+- [x] 2.3 推送验证两 job 真实绿灯；故意引入一个失败提交验证红灯可见后还原
 
 ## 3. 检索评测基线
 
@@ -41,6 +41,6 @@
 
 ## 6. 验收（PM）
 
-- [ ] 6.1 主观验收：CI 两 job 绿灯截图/链接；故意漂移一次检索顺序确认离线档红灯
-- [ ] 6.2 核对四份 spec delta 场景逐条有对应用例或脚本产出
+- [x] 6.1 主观验收：CI 两 job 绿灯截图/链接；故意漂移一次检索顺序确认离线档红灯
+- [x] 6.2 核对四份 spec delta 场景逐条有对应用例或脚本产出
 - [ ] 6.3 真实档基线数已入 docs 且含配置指纹；`openspec status` 全勾后归档
