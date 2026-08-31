@@ -59,9 +59,9 @@ from tests.eval.harness import (
 )
 from tests.helpers.fixture_graph import index_fixture_repo
 
-# integration：要 Neo4j。eval：便于 `-m eval` 单独跑这一档
-# （eval marker 尚未注册进 pyproject，见交付说明——那个文件归后端会话独占）
-pytestmark = [pytest.mark.integration, pytest.mark.eval]
+# eval：便于 `-m eval` 单独跑这一档。integration（要 Neo4j）只标在真用库的
+# 用例上——golden 集形状与配置指纹两条纯断言进单测档，每次 push/PR 都跑。
+pytestmark = [pytest.mark.eval]
 
 EVAL_TOP_K = 8
 UPDATE = os.getenv("EVAL_UPDATE_SNAPSHOT") == "1"
@@ -129,7 +129,15 @@ def offline_config():
 
 @pytest.fixture(scope="module")
 async def indexed_project(offline_config):
-    """空 Neo4j 上自动建图——评测无任何手工准备步骤（spec: 评测集可复现建图）。"""
+    """空 Neo4j 上自动建图——评测无任何手工准备步骤（spec: 评测集可复现建图）。
+
+    ⚠️ module 级 async fixture 与 function 级事件循环存在错配：现有三个 parametrize
+    用例共用缓存结果所以不炸，但**新增测试函数直接复用本 fixture 会
+    `RuntimeError: Future attached to a different loop`**（组 3 探针实锤）。
+    正确修法是给 fixture 与用例配对 loop_scope="module"，涉及 pytest-asyncio
+    行为面，已记 M18 backlog——在那之前新增用例请通过 eval_results 传值，
+    不要直接 await 本 fixture 里的对象。
+    """
     # module 级 fixture 拿不到 function 级的 fake_embedder，这里自己打桩
     from unittest.mock import patch
 
@@ -206,6 +214,7 @@ async def eval_results(indexed_project):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("question_type", QUESTION_TYPES)
 async def test_offline_snapshot(eval_results, question_type):
     """node_id 序列与基线快照逐条比对；不一致时列出漂移的 query 与前后序列。"""
@@ -263,6 +272,7 @@ async def test_offline_snapshot(eval_results, question_type):
         pytest.fail("\n".join(report))
 
 
+@pytest.mark.integration
 async def test_snapshot_pins_node_ids_not_scores(eval_results):
     """spec: 分数尺度变化不误报——快照内容里不能出现任何分数字段。"""
     payload = snapshot_payload(eval_results, EVAL_TOP_K)
