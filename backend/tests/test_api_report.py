@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.tables import Project, ProjectStatus, UnderstandingReport
-from tests.test_report import make_tree
+from tests.helpers.report import make_tree
 
 SEQUENCES = [
     {

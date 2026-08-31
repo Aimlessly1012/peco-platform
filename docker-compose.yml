@@ -40,7 +40,7 @@ services:
       NEO4J_URI: bolt://neo4j:7687
       REPOS_DIR: /data/repos
     volumes:
-      - ./data/repos:/data/repos
+      - ./data/repos:/data/repos   # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
     ports:
       - "9200:8000"   # 宿主 9200（本机 8000/8001 已被其他服务占用）
     depends_on:
@@ -91,7 +91,7 @@ services:
       NEO4J_URI: bolt://neo4j:7687
       REPOS_DIR: /data/repos
     volumes:
-      - ./data/repos:/data/repos   # 与 backend 同一份仓库副本
+      - ./data/repos:/data/repos   # 与 backend 共享同一任务级临时区（M16 后非持久层）
     depends_on:
       db:
         condition: service_healthy

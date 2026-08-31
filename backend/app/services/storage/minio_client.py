@@ -41,8 +41,28 @@ def get_client():
                 access_key=settings.minio_access_key,
                 secret_key=settings.minio_secret_key,
                 secure=settings.minio_secure,
+                http_client=_http_client(),
             )
         return _client
+
+
+def _http_client():
+    """带显式超时的连接池（M17 D8）。
+
+    SDK 默认的 http_client 不设超时且 retries=5 带退避——MinIO「端口能连上但不
+    响应」时，一次下载能挂住分钟级，把索引任务卡死在取码这一步。这里把连接/读
+    超时与重试次数都钉死，让它在秒级内失败，走既有降级路径（下载失败→回退
+    clone，上传失败→warning）。只改失败路径，成功路径行为不变。
+    """
+    import urllib3
+
+    return urllib3.PoolManager(
+        timeout=urllib3.Timeout(
+            connect=settings.minio_connect_timeout_seconds,
+            read=settings.minio_read_timeout_seconds,
+        ),
+        retries=urllib3.Retry(total=1, backoff_factor=0.2, redirect=False),
+    )
 
 
 def reset_client() -> None:

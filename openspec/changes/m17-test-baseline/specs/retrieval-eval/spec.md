@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: golden 评测集
-仓库 SHALL 维护一个标注检索评测集：基于固定 fixture 仓（mini_repo，必要时扩充），每条记录含 query、question_type（local/global/impact）与期望命中（node_id 或文件+行号区间）；规模 SHALL 不少于 20 条且三类问题均有覆盖。评测集变更 SHALL 经代码评审（纯数据文件，diff 可读）。
+仓库 SHALL 维护一个标注检索评测集：基于固定 fixture 仓（mini_repo，必要时扩充），每条记录含 query、question_type（local/global/impact）与期望命中（文件粒度；模块摘要按模块名匹配——node_id 含起始行号，代码微调即失效，文件粒度足以判定「有没有找对地方」）；规模 SHALL 不少于 20 条且三类问题均有覆盖。评测集变更 SHALL 经代码评审（纯数据文件，diff 可读）。
 
 #### Scenario: 评测集可复现建图
 - **WHEN** 在空 Neo4j 上运行评测 harness

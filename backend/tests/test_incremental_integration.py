@@ -14,21 +14,11 @@ from git import Repo
 from app.graph.client import close_driver, delete_project_graph, ensure_vector_index, get_driver
 from app.models.tables import Project
 from app.services.ingest.pipeline import MODE_AUTO, MODE_FULL, run_index_job
+from tests.helpers.repos import make_source_repo
 
 pytestmark = pytest.mark.integration
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "mini_repo"
-
-
-def make_source_repo(path: Path) -> tuple[Repo, str]:
-    """把 mini_repo 复制成一个真实 git 仓库作为"远端"。"""
-    shutil.copytree(FIXTURE_REPO, path, dirs_exist_ok=True)
-    repo = Repo.init(path)
-    repo.config_writer().set_value("user", "name", "test").release()
-    repo.config_writer().set_value("user", "email", "test@example.com").release()
-    repo.git.add(A=True)
-    repo.index.commit("init")
-    return repo, repo.head.commit.hexsha
 
 
 def apply_changes(repo: Repo, path: Path) -> str:

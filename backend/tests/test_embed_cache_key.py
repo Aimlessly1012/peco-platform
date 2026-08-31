@@ -10,7 +10,7 @@ import pytest
 
 from app.core.config import settings
 from app.services.ingest.pipeline import MODE_AUTO, build_index_plan, embed_cache_key
-from tests.test_incremental import commit_all, existing, make_repo
+from tests.helpers.repos import commit_all, existing, make_repo
 
 TEXT = "[项目: shop | 模块: orders]\ndef create_order(): ..."
 

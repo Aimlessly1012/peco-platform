@@ -15,7 +15,7 @@ from app.services.ingest.pipeline import (
 )
 from app.services.ingest.router_parser import ModuleMap, RouteModule
 from app.services.ingest.summarizer import FAST_PREFIX
-from tests.test_incremental import commit_all, existing, make_repo
+from tests.helpers.repos import commit_all, existing, make_repo
 
 
 # ---------------- API 贯通 ----------------

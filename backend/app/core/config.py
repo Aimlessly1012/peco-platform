@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     minio_secret_key: str = ""
     minio_bucket: str = "rag-artifacts"
     minio_secure: bool = False
+    # M17 D8：显式超时。SDK 默认不设超时，MinIO"能连上但不响应"时
+    # 索引任务会在取码这一步挂住分钟级。read 给 30s 是为了让大 bundle 上传有余量
+    #（urllib3 的 read 超时是每次读之间的间隔，不是整体耗时）
+    minio_connect_timeout_seconds: float = 5
+    minio_read_timeout_seconds: float = 30
 
     # M14 容量护栏：项目数是主约束（Neo4j 内存随项目数涨），磁盘是兜底。
     # 上线后按 docker stats 实测回调 project_limit

@@ -37,6 +37,7 @@ from app.services.ingest.chunker import ChunkError, CodeChunk, chunk_file
 from app.services.ingest.deps_extractor import extract_imports
 from app.services.ingest.embedder import embedder
 from app.services.ingest.git_ops import (
+    BundleVerifyError,
     GitDiffError,
     GitPullError,
     diff_changed_files,
@@ -553,6 +554,10 @@ async def archive_repo_bundle(project_id, repo_dir: Path, stats: dict) -> None:
         key = await asyncio.to_thread(export_bundle, str(project_id), repo_dir)
         if key:
             stats["repo_bundle_key"] = key
+    except BundleVerifyError as e:
+        # 固定 key 是覆盖写：坏包传上去就把唯一那份好包顶掉了（M17 D8）
+        stats["repo_bundle_warning"] = f"源码 bundle 自校验失败，已保留远端旧包：{e}"
+        logger.warning("bundle 自校验失败，跳过上传以保留远端旧包：%s", e)
     except Exception as e:  # noqa: BLE001 — 非关键路径，绝不反噬任务成败
         stats["repo_bundle_warning"] = f"源码 bundle 归档失败：{type(e).__name__}: {e}"
         logger.warning("源码 bundle 归档失败（不影响任务成败）：%s", e)

@@ -17,7 +17,7 @@ from app.services.report.features import (
     route_segment_points,
 )
 from app.services.report.graph_reader import FileNode, ModuleNode, ProjectTree
-from tests.test_report import FakeLLM, make_tree
+from tests.helpers.report import FakeLLM, make_tree
 
 ANCHORS = {
     "api:orders": [

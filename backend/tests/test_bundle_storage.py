@@ -5,10 +5,11 @@
 """
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from git import Repo
+
+from tests.helpers.repos import init_repo_with as make_repo, write_and_commit as commit
 
 from app.core.config import settings
 from app.services.ingest import git_ops
@@ -21,71 +22,6 @@ from app.services.ingest.git_ops import (
     ls_remote_head,
     restore_workdir,
 )
-
-
-def make_repo(path: Path, files: dict[str, str], message: str = "init") -> str:
-    path.mkdir(parents=True, exist_ok=True)
-    repo = Repo.init(path)
-    repo.config_writer().set_value("user", "name", "test").release()
-    repo.config_writer().set_value("user", "email", "test@example.com").release()
-    return commit(repo, path, files, message)
-
-
-def commit(repo: Repo, path: Path, files: dict[str, str], message: str) -> str:
-    for name, content in files.items():
-        target = path / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
-    repo.git.add(A=True)
-    repo.index.commit(message)
-    return repo.head.commit.hexsha
-
-
-@pytest.fixture
-def origin(tmp_path):
-    """两个提交的"远端"仓库。"""
-    path = tmp_path / "origin"
-    first = make_repo(path, {"a.py": "def a():\n    return 1\n"})
-    repo = Repo(path)
-    second = commit(repo, path, {"b.py": "def b():\n    return 2\n"}, "second")
-    return SimpleNamespace(path=path, url=str(path), repo=repo,
-                           first=first, head=second)
-
-
-@pytest.fixture
-def store(tmp_path, monkeypatch):
-    """目录当 MinIO：能装 bundle、能造"缺失/损坏/抛异常"三种故障。"""
-    root = tmp_path / "minio"
-    root.mkdir()
-    state = {"enabled": True, "download_raises": False, "upload_raises": False,
-             "uploaded": []}
-
-    def storage_enabled():
-        return state["enabled"]
-
-    def download_file(key, dest):
-        if state["download_raises"]:
-            raise OSError("minio 不可达")
-        src = root / key.replace("/", "_")
-        if not src.exists():
-            return False
-        Path(dest).write_bytes(src.read_bytes())
-        return True
-
-    def upload_file(key, path, content_type=None):
-        if state["upload_raises"]:
-            raise OSError("minio 不可达")
-        (root / key.replace("/", "_")).write_bytes(Path(path).read_bytes())
-        state["uploaded"].append((key, content_type))
-        return key
-
-    monkeypatch.setattr(git_ops, "minio_client", SimpleNamespace(
-        storage_enabled=storage_enabled, download_file=download_file,
-        upload_file=upload_file,
-    ))
-    state["root"] = root
-    state["path_of"] = lambda key: root / key.replace("/", "_")
-    return state
 
 
 # ---------------- 3.1 bundle 往返 ----------------

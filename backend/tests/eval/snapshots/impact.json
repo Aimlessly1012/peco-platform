@@ -1,0 +1,73 @@
+{
+  "config": {
+    "retrieval_top_k": 8,
+    "rerank_enabled": false,
+    "rerank_model": "",
+    "rerank_candidate_multiplier": 3,
+    "embedding_model": "text-embedding-v3",
+    "embedding_dim": 1024,
+    "eval_top_k": 8
+  },
+  "queries": {
+    "impact-01": [
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:backend/routers/orders.py:(module):1",
+      "{project}:backend/routers/orders.py:create_order:15",
+      "{project}:backend/routers/users.py:get_user:13"
+    ],
+    "impact-02": [
+      "{project}:backend/routers/orders.py",
+      "{project}:backend/routers/orders.py:create_order:15",
+      "{project}:backend/models.py",
+      "{project}:backend/services/order_service.py:OrderService:4",
+      "{project}:backend/routers/orders.py:cancel_order:23",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:frontend/components/OrderCard.tsx:OrderCard:5",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11"
+    ],
+    "impact-03": [
+      "{project}:backend/routers/orders.py:(module):1",
+      "{project}:backend/services/order_service.py",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/services/order_service.py:(module):1",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/services/order_service.py:OrderService:4"
+    ],
+    "impact-04": [
+      "{project}:frontend/lib/api.ts",
+      "{project}:frontend/lib/api.ts:apiGet:1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:frontend/lib/api.ts:apiPost:6",
+      "{project}:frontend/pages/orders.tsx:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:create_order:15",
+      "{project}:backend/routers/orders.py:list_orders:9"
+    ],
+    "impact-05": [
+      "{project}:backend/models.py",
+      "{project}:backend/models.py:Order:11",
+      "{project}:backend/models.py:(module):1",
+      "{project}:backend/routers/orders.py",
+      "{project}:backend/models.py:OrderItem:4",
+      "{project}:backend/routers/orders.py:cancel_order:23",
+      "{project}:backend/services/order_service.py:OrderService:4",
+      "{project}:backend/routers/orders.py:list_orders:9"
+    ],
+    "impact-06": [
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:frontend/components/OrderCard.tsx:OrderCard:5",
+      "{project}:backend/routers/users.py",
+      "{project}:frontend/components/OrderCard.tsx:Props:1",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/pages/orders.tsx:(module):1",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/orders.py:list_orders:9"
+    ]
+  }
+}

@@ -1,0 +1,126 @@
+name: CI
+
+# 单测档跟每次 push 与 PR；集成档要起 Neo4j/MinIO 两个服务容器，
+# 只在 main 的 push 上跑（PR 上跑会把每次改动的等待时间拉到分钟级）
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"          # 用锁文件里的版本，CI 不做隐式升级
+
+jobs:
+  unit:
+    name: 单测档（无外部服务）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: 装依赖
+        run: uv sync --group dev
+
+      # 仓库里不提交 .env，CI 上也就没有——而「从仓库根误跑不打真实 API」这条
+      # 护栏的用例需要仓库根**存在** .env 才成立，否则它会静默 skip，门禁等于
+      # 只在开发机上有。这里造一份一眼假的出来让它真跑。
+      # 注意：这里面没有任何真凭据，也永远不该有——护栏要证明的恰恰是
+      # 「就算根目录摆着 .env，测试也不会去读它」
+      - name: 构造含假 key 的 .env 验证护栏
+        working-directory: ${{ github.workspace }}
+        run: |
+          cat > .env <<'EOF'
+          # 仅供 CI 验证 .env 隔离护栏，不是真凭据
+          CHAT_API_KEY=ci-fake-chat-key-do-not-use
+          EMBEDDING_API_KEY=ci-fake-embedding-key-do-not-use
+          RERANK_API_KEY=ci-fake-rerank-key-do-not-use
+          EOF
+
+      # 覆盖率门槛与超时都写在 backend/pyproject.toml 的 addopts 里，
+      # 这里不重复配置，避免两处漂移
+      - name: 跑单测档
+        run: uv run pytest -m "not integration"
+
+      - name: 存覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: backend/.coverage
+          if-no-files-found: ignore
+
+  integration:
+    name: 集成档（自带 Neo4j + MinIO）
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/ragcoder123
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_dbms_security_procedures_unrestricted: apoc.*
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: 装依赖
+        run: uv sync --group dev
+
+      # MinIO 用 docker run 而不是 services 容器：官方镜像的 ENTRYPOINT 不带
+      # server 子命令，而 services 块不支持覆盖 command——换 bitnami 镜像能绕开，
+      # 但那是第三方分发，不如自己 run 一行来得稳
+      - name: 起 MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=ragminio -e MINIO_ROOT_PASSWORD=ragminio123 \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null; then
+              echo "MinIO 就绪（第 ${i} 次探测）"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO 30 次探测仍未就绪"; docker logs minio; exit 1
+
+      # --no-cov：只跑集成档时覆盖率必然跌破 fail_under，那不是信号
+      - name: 跑集成档
+        env:
+          NEO4J_URI: bolt://localhost:7687
+          MINIO_TEST_ENDPOINT: localhost:9000
+          MINIO_TEST_ACCESS_KEY: ragminio
+          MINIO_TEST_SECRET_KEY: ragminio123
+        run: uv run pytest -m integration --no-cov
+
+      - name: 收 MinIO 日志（失败时）
+        if: failure()
+        run: docker logs minio || true

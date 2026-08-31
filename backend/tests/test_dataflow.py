@@ -7,7 +7,7 @@ from app.services.report.dataflow import (
     select_edges,
 )
 from app.services.report.graph_reader import ModuleEdge
-from tests.test_report import make_tree
+from tests.helpers.report import make_tree
 
 
 def edge(src: str, dst: str, relation: str = "calls_api", count: int = 3) -> ModuleEdge:

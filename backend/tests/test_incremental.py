@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from git import Repo
 
+from tests.helpers.repos import commit_all, existing, make_repo
 from app.services.ingest.git_ops import (
     ChangedFiles,
     GitDiffError,
@@ -15,19 +16,6 @@ from app.services.ingest.git_ops import (
     parse_name_status,
 )
 from app.services.ingest.pipeline import MODE_AUTO, MODE_FULL, build_index_plan
-
-
-def make_repo(path: Path) -> Repo:
-    repo = Repo.init(path)
-    repo.config_writer().set_value("user", "name", "test").release()
-    repo.config_writer().set_value("user", "email", "test@example.com").release()
-    return repo
-
-
-def commit_all(repo: Repo, message: str) -> str:
-    repo.git.add(A=True)
-    repo.index.commit(message)
-    return repo.head.commit.hexsha
 
 
 # ---------------- name-status 解析 ----------------
@@ -153,15 +141,6 @@ def graph_stub(monkeypatch):
     monkeypatch.setattr("app.services.ingest.pipeline.load_chunk_metadata", fake_chunks)
     monkeypatch.setattr("app.services.ingest.pipeline.load_project_index_meta", fake_meta)
     return state
-
-
-def existing(paths: list[str]) -> dict:
-    from app.services.ingest.graph_writer import FileInfo
-
-    return {
-        p: FileInfo(path=p, language="python", content_hash="h", summary="s", imports=[])
-        for p in paths
-    }
 
 
 async def test_plan_full_mode_never_diffs(tmp_path, graph_stub):

@@ -8,7 +8,7 @@ from app.models.tables import IndexDepth, Project, UnderstandingReport
 from app.services.ingest.pipeline import partial_reason
 from app.services.report.graph_reader import GraphEdges, ModuleEdge, ProjectTree
 from app.services.report.service import generate_and_store_report
-from tests.test_report import GOOD_SEQ, FakeLLM, make_edges, make_tree
+from tests.helpers.report import GOOD_SEQ, FakeLLM, make_edges, make_tree
 
 
 @pytest.fixture

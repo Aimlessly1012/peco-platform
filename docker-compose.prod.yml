@@ -51,7 +51,7 @@ services:
       # Nginx 已剥掉 /rag/api 前缀，这里只用于 openapi.json / docs 的地址生成
       ROOT_PATH: /rag/api
     volumes:
-      - ./data/repos:/data/repos     # 仓库副本要持久化，重建容器不必重新 clone
+      - ./data/repos:/data/repos     # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
     ports:
       - "127.0.0.1:8001:8000"        # 只监听回环，公网流量必须过 Nginx
     restart: unless-stopped
@@ -105,7 +105,7 @@ services:
       NEO4J_URI: bolt://neo4j:7687
       REPOS_DIR: /data/repos
     volumes:
-      - ./data/repos:/data/repos     # 与 backend 同一份仓库副本
+      - ./data/repos:/data/repos     # 与 backend 共享同一任务级临时区（M16 后非持久层）
     restart: unless-stopped
     # 索引大仓时实测 400~600MB（design 内存账），768 留一档余量；
     # 超限被杀的只是 worker，任务由 acks_late 重投递续跑

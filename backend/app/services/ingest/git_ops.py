@@ -29,6 +29,10 @@ class GitPullError(Exception):
     """携带可读中文错误信息，保证不含 token。"""
 
 
+class BundleVerifyError(Exception):
+    """bundle 自校验未通过（M17 D8）。抛它 = 别上传，远端那份好包留着。"""
+
+
 class GitDiffError(Exception):
     """diff 不可用（旧 commit 已被 gc、仓库非 git 等）——调用方据此回退全量。"""
 
@@ -297,17 +301,36 @@ def restore_workdir(
     return clone_fresh(git_url, dest, token, branch), "clone"
 
 
-def export_bundle(project_id: str, repo_dir: Path) -> str | None:
-    """git bundle create --all → MinIO 固定 key（D3）。返回 key；存储未启用返回 None。
+def _create_bundle(repo_dir: Path, out_path: str) -> None:
+    Repo(repo_dir).git.bundle("create", out_path, "--all")
 
-    失败往外抛，由调用方降级为 warning——与快照归档同一条纪律。
+
+def _verify_bundle(repo_dir: Path, path: str) -> None:
+    """产包后的自校验（M17 D8 硬化一）。不过就抛 BundleVerifyError。
+
+    为什么值得单独走一趟 git：固定 key 是**覆盖写**，一个半截的坏包传上去就把
+    唯一那份好包顶掉了，而坏在哪儿要等到下次恢复时才发现。verify 是本地操作、
+    毫秒级，用它换"坏包永不覆盖好包"很划算。
+    """
+    try:
+        Repo(repo_dir).git.bundle("verify", path)
+    except GitCommandError as e:
+        raise BundleVerifyError(_sanitize(str(e), None)[:200]) from e
+
+
+def export_bundle(project_id: str, repo_dir: Path) -> str | None:
+    """git bundle create --all → 自校验 → MinIO 固定 key（D3 + M17 D8）。
+
+    返回 key；存储未启用返回 None。失败往外抛，由调用方降级为 warning——
+    与快照归档同一条纪律。
     """
     if not minio_client.storage_enabled():
         return None
     fd, tmp = tempfile.mkstemp(suffix=".bundle", prefix="repo-bundle-")
     os.close(fd)
     try:
-        Repo(repo_dir).git.bundle("create", tmp, "--all")
+        _create_bundle(repo_dir, tmp)
+        _verify_bundle(repo_dir, tmp)   # 不过就不上传，远端旧包原样留着
         return minio_client.upload_file(
             bundle_key(project_id), tmp, BUNDLE_CONTENT_TYPE
         )

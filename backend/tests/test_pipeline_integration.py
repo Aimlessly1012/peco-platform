@@ -7,7 +7,6 @@
 - 检索冒烟：局部问题命中预期文件；全局问题命中摘要层（跨项目隔离）
 """
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -17,99 +16,11 @@ from app.graph.client import (
     ensure_vector_index,
     get_driver,
 )
-from app.services.ingest.api_matcher import extract_api_edges
-from app.services.ingest.graph_writer import ModuleInfo, write_project_graph
-from app.services.ingest.module_mapper import (
-    assign_files,
-    ensure_shared_module,
-    module_key,
-)
-from app.services.ingest.pipeline import _parse_all, build_embed_text, embed_cache_key
-from app.services.ingest.router_parser import parse_routes
-from app.services.ingest.summarizer import module_agg_hash
-from app.services.ingest.walker import walk_repo
 from app.services.retrieval.service import search_layered
-
-FIXTURE_REPO = Path(__file__).parent / "fixtures" / "mini_repo"
+# M17 3.2：建图流程提升为共享 helper，评测 harness 与本文件共用同一套
+from tests.helpers.fixture_graph import index_fixture_repo
 
 pytestmark = pytest.mark.integration
-
-
-async def _index_fixture(project_id: str, fake_embedder, fake_summarizer):
-    """跑 M2 parse→summarize→embed→graph 段（git 阶段由手动验收覆盖）。"""
-    walk = walk_repo(FIXTURE_REPO)
-    files, chunks, imports, heads, parse_failed = _parse_all(FIXTURE_REPO, walk.files)
-    assert parse_failed == 0
-
-    file_paths = [f.path for f in files]
-    repo_files = {f.path: (FIXTURE_REPO / f.path).read_text(encoding="utf-8") for f in files}
-    for extra in FIXTURE_REPO.rglob("package.json"):
-        repo_files[str(extra.relative_to(FIXTURE_REPO))] = extra.read_text(encoding="utf-8")
-
-    module_map = parse_routes(file_paths, repo_files)
-    assignment = assign_files(file_paths, module_map, imports)
-    ensure_shared_module(module_map, assignment)
-    for f in files:
-        f.modules = assignment.get(f.path, ["shared"])
-        f.imports = sorted(imports.get(f.path, set()))
-
-    chunks_by_key = {(c.file_path, c.symbol): c for c in chunks}
-    frontend_chunks = [c for c in chunks if c.language != "python"]
-    api_edges, _ = extract_api_edges(frontend_chunks, module_map.backend_routes, chunks_by_key)
-
-    # 摘要（mock）
-    files_by_path = {f.path: f for f in files}
-    chunks_by_file = {}
-    for c in chunks:
-        chunks_by_file.setdefault(c.file_path, []).append(c)
-    for f in files:
-        f.summary = await fake_summarizer.summarize_file(
-            f.path, imports.get(f.path, set()), chunks_by_file.get(f.path, []), ""
-        )
-    module_summaries = {}
-    for m in module_map.modules:
-        module_summaries[module_key(m)] = await fake_summarizer.summarize_module(
-            m.name, m.kind, m.route_prefix, m.entry_files, {}
-        )
-    project_summary = await fake_summarizer.summarize_project("", module_map, module_summaries)
-
-    # 嵌入（fake，embed_key 缓存键）
-    embed_texts, embed_keys, embeddings = {}, {}, {}
-    for c in chunks:
-        f = files_by_path.get(c.file_path)
-        text = build_embed_text(c, "mini-shop", f.modules if f else ["shared"], "", f.summary if f else "")
-        embed_texts[c.content_hash] = text
-        embed_keys[c.content_hash] = embed_cache_key(text)
-    unique = list({c.content_hash: c for c in chunks})
-    vectors = await fake_embedder.embed_texts([embed_texts[h] for h in unique])
-    embeddings = dict(zip(unique, vectors))
-
-    for f in files:
-        f.summary_embedding = (await fake_embedder.embed_texts([f.summary]))[0]
-    modules_info = [
-        ModuleInfo(
-            name=m.name, key=module_key(m), kind=m.kind, route_prefix=m.route_prefix,
-            summary=module_summaries.get(module_key(m), ""),
-            agg_hash=module_agg_hash(
-                [f.content_hash for f in files if module_key(m) in f.modules]
-            ),
-            # 与 pipeline 的写法保持一致（M6 B7），否则集成测试覆盖不到路由写入
-            route_paths=[f"{path}|{entry}" for path, entry in m.route_paths],
-            summary_embedding=(
-                await fake_embedder.embed_texts(
-                    [module_summaries.get(module_key(m), m.name)]
-                )
-            )[0],
-        )
-        for m in module_map.modules
-    ]
-
-    await write_project_graph(
-        project_id, "mini-shop", "file://fixture", project_summary,
-        modules_info, files, chunks, embed_texts, embeddings, api_edges,
-        embed_keys=embed_keys,
-    )
-    return files, chunks, modules_info, api_edges
 
 
 @pytest.fixture
@@ -130,7 +41,7 @@ async def _count(cypher: str, **params) -> int:
 async def test_graph_write_m2_schema(neo4j_ready, fake_embedder, fake_summarizer):
     pid = f"test-{uuid.uuid4().hex[:8]}"
     try:
-        files, chunks, modules, api_edges = await _index_fixture(pid, fake_embedder, fake_summarizer)
+        files, chunks, modules, api_edges = await index_fixture_repo(pid, fake_embedder, fake_summarizer)
 
         module_count = await _count(
             "MATCH (m:Module {project_id: $pid}) RETURN count(m) AS n", pid=pid
@@ -173,8 +84,8 @@ async def test_layered_retrieval_smoke(neo4j_ready, fake_embedder, fake_summariz
     pid = f"test-{uuid.uuid4().hex[:8]}"
     pid_other = f"test-{uuid.uuid4().hex[:8]}"
     try:
-        await _index_fixture(pid, fake_embedder, fake_summarizer)
-        await _index_fixture(pid_other, fake_embedder, fake_summarizer)
+        await index_fixture_repo(pid, fake_embedder, fake_summarizer)
+        await index_fixture_repo(pid_other, fake_embedder, fake_summarizer)
 
         # 局部问题命中预期代码块
         results = await search_layered(pid, "create_order 创建订单的接口在哪", "local", top_k=6)

@@ -9,7 +9,7 @@ import pytest
 
 from app.graph.client import close_driver, delete_project_graph, ensure_vector_index
 from app.services.retrieval.service import MAX_IMPACT_DEPTH, impact_of
-from tests.test_pipeline_integration import _index_fixture
+from tests.helpers.fixture_graph import index_fixture_repo
 
 pytestmark = pytest.mark.integration
 
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration
 async def indexed(fake_embedder, fake_summarizer):
     await ensure_vector_index()
     pid = f"test-{uuid.uuid4().hex[:8]}"
-    await _index_fixture(pid, fake_embedder, fake_summarizer)
+    await index_fixture_repo(pid, fake_embedder, fake_summarizer)
     yield pid
     await delete_project_graph(pid)
     await close_driver()
@@ -95,7 +95,7 @@ async def test_leaf_file_has_no_dependents(indexed):
 async def test_project_isolation(indexed, fake_embedder, fake_summarizer):
     other = f"test-{uuid.uuid4().hex[:8]}"
     try:
-        await _index_fixture(other, fake_embedder, fake_summarizer)
+        await index_fixture_repo(other, fake_embedder, fake_summarizer)
         impact = await impact_of(indexed, "backend/services/order_service.py", max_depth=3)
         # 另一个项目有同名文件，但结果里不能混入（所有查询按 project_id 过滤）
         assert impact["direct"], "本项目内仍应查到引用者"

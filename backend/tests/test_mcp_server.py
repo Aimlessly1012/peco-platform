@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 from app.models.tables import Project, ProjectStatus, UnderstandingReport
 from app.services.report.graph_reader import ProjectTree
 from app.services.retrieval.service import RetrievedItem
-from tests.test_report import make_tree
+from tests.helpers.report import make_tree
 
 TOOL_NAMES = {
     "list_projects",

@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "corpus": "backend/tests/fixtures/mini_repo",
+  "note": "检索评测 golden 集（M17 3.1）。期望命中标到文件粒度（expect_files）而不是 node_id：node_id 含起始行号，改几行代码就会让标注失效，而文件粒度足以判定「检索有没有找对地方」。module_summary 没有 file_path，用 expect_modules 匹配其 symbol。这里的期望是人工判定的正确答案，只有真实 embedding 档才有意义——离线 fake 向量是 md5 词袋，无语义能力（见 docs/retrieval-baseline.md）。",
+  "match": {
+    "expect_files": "命中条件：结果项 file_path 等于其一",
+    "expect_modules": "命中条件：结果项 kind=module_summary 且 symbol 等于其一",
+    "expect_symbols": "可选，仅记录人工判断的理想命中符号，不参与指标计算"
+  },
+  "queries": [
+    {
+      "id": "local-01",
+      "query": "创建订单的接口在哪个文件",
+      "question_type": "local",
+      "expect_files": ["backend/routers/orders.py"],
+      "expect_symbols": ["create_order"]
+    },
+    {
+      "id": "local-02",
+      "query": "订单列表的 GET 接口怎么实现的",
+      "question_type": "local",
+      "expect_files": ["backend/routers/orders.py"],
+      "expect_symbols": ["list_orders"]
+    },
+    {
+      "id": "local-03",
+      "query": "取消订单的逻辑写在哪",
+      "question_type": "local",
+      "expect_files": ["backend/routers/orders.py", "backend/services/order_service.py"],
+      "expect_symbols": ["cancel_order", "OrderService"]
+    },
+    {
+      "id": "local-04",
+      "query": "订单总价是怎么算出来的",
+      "question_type": "local",
+      "expect_files": ["backend/services/order_service.py"],
+      "expect_symbols": ["OrderService"]
+    },
+    {
+      "id": "local-05",
+      "query": "Order 和 OrderItem 数据结构定义",
+      "question_type": "local",
+      "expect_files": ["backend/models.py"],
+      "expect_symbols": ["Order", "OrderItem"]
+    },
+    {
+      "id": "local-06",
+      "query": "查询单个用户的接口",
+      "question_type": "local",
+      "expect_files": ["backend/routers/users.py"],
+      "expect_symbols": ["get_user"]
+    },
+    {
+      "id": "local-07",
+      "query": "健康检查端点 health",
+      "question_type": "local",
+      "expect_files": ["backend/main.py"],
+      "expect_symbols": ["health"]
+    },
+    {
+      "id": "local-08",
+      "query": "前端发 GET 请求的封装函数",
+      "question_type": "local",
+      "expect_files": ["frontend/lib/api.ts"],
+      "expect_symbols": ["apiGet"]
+    },
+    {
+      "id": "local-09",
+      "query": "订单页面组件在哪，怎么拉数据的",
+      "question_type": "local",
+      "expect_files": ["frontend/pages/orders.tsx"],
+      "expect_symbols": ["OrdersPage"]
+    },
+    {
+      "id": "local-10",
+      "query": "订单卡片是怎么渲染的",
+      "question_type": "local",
+      "expect_files": ["frontend/components/OrderCard.tsx"],
+      "expect_symbols": ["OrderCard"]
+    },
+    {
+      "id": "local-11",
+      "query": "路由是在哪里注册到应用上的",
+      "question_type": "local",
+      "expect_files": ["backend/main.py"],
+      "expect_symbols": ["(module)"]
+    },
+    {
+      "id": "global-01",
+      "query": "这个项目整体架构是什么样的，有哪些模块",
+      "question_type": "global",
+      "expect_modules": ["orders", "users", "shared"],
+      "expect_files": ["backend/main.py"]
+    },
+    {
+      "id": "global-02",
+      "query": "订单模块负责什么业务",
+      "question_type": "global",
+      "expect_modules": ["orders"],
+      "expect_files": ["backend/routers/orders.py", "backend/services/order_service.py"]
+    },
+    {
+      "id": "global-03",
+      "query": "用户相关的功能有哪些",
+      "question_type": "global",
+      "expect_modules": ["users"],
+      "expect_files": ["backend/routers/users.py"]
+    },
+    {
+      "id": "global-04",
+      "query": "前后端是怎么分层的，前端调后端走什么",
+      "question_type": "global",
+      "expect_files": ["frontend/lib/api.ts", "backend/main.py"],
+      "expect_modules": ["shared"]
+    },
+    {
+      "id": "global-05",
+      "query": "下单这条业务链路从页面到接口经过哪些地方",
+      "question_type": "global",
+      "expect_files": [
+        "frontend/pages/orders.tsx",
+        "frontend/lib/api.ts",
+        "backend/routers/orders.py",
+        "backend/services/order_service.py"
+      ]
+    },
+    {
+      "id": "global-06",
+      "query": "后端接口一共提供了哪几个端点",
+      "question_type": "global",
+      "expect_files": ["backend/routers/orders.py", "backend/routers/users.py", "backend/main.py"],
+      "expect_modules": ["orders", "users", "health"]
+    },
+    {
+      "id": "impact-01",
+      "query": "改动 backend/routers/orders.py 会影响哪些地方",
+      "question_type": "impact",
+      "expect_files": ["backend/routers/orders.py", "backend/main.py", "frontend/pages/orders.tsx"]
+    },
+    {
+      "id": "impact-02",
+      "query": "create_order 被谁调用了",
+      "question_type": "impact",
+      "expect_files": ["backend/routers/orders.py", "frontend/pages/orders.tsx"]
+    },
+    {
+      "id": "impact-03",
+      "query": "改 OrderService 的接口会波及什么",
+      "question_type": "impact",
+      "expect_files": ["backend/services/order_service.py", "backend/routers/orders.py"]
+    },
+    {
+      "id": "impact-04",
+      "query": "frontend/lib/api.ts 被哪些页面用到",
+      "question_type": "impact",
+      "expect_files": ["frontend/lib/api.ts", "frontend/pages/orders.tsx", "frontend/pages/index.tsx"]
+    },
+    {
+      "id": "impact-05",
+      "query": "models.py 里的 Order 改字段会影响谁",
+      "question_type": "impact",
+      "expect_files": ["backend/models.py", "backend/services/order_service.py", "backend/routers/orders.py"]
+    },
+    {
+      "id": "impact-06",
+      "query": "OrderCard 组件改了影响哪些页面",
+      "question_type": "impact",
+      "expect_files": ["frontend/components/OrderCard.tsx", "frontend/pages/orders.tsx"]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 拉取 GitLab/GitHub 仓库 → AST 分块 → 向量化 → Neo4j 知识图谱 → 选项目聊天问答（带代码引用）→ 项目理解报告 → MCP 供 Claude Code 等编码 agent 检索。
 
 - 总设计：`docs/superpowers/specs/2026-08-11-rag-coder-design.md`（M1-M4 全貌）
-- 当前进度：**M4 增量重索引 / 影响面多跳 / 可观测性**（OpenSpec change: `openspec/changes/m4-incremental-impact/`）
+- 当前进度：**M17 测试与回归基线**（CI 门禁 + 检索评测双层 + 存储故障演练；M1–M16 已完成归档，见 `openspec/changes/archive/`）
 
 ## 技术栈
 
@@ -116,22 +116,35 @@ claude mcp add --transport http rag-coder http://localhost:9200/mcp --header "Au
 
 增量任务的 stats 另含 `mode`、`changed_files`、`reparsed_files`、`reused_files`、`deleted_files`。
 
-## 测试
+## 测试（M17：CI 门禁 + 覆盖率基线）
+
+单测档（无外部服务；含覆盖率门槛 `--cov-fail-under` 与用例超时，配置见 `backend/pyproject.toml`）：
 
 ```bash
 cd backend && uv run pytest -m "not integration"
 ```
 
-集成测试需要 Neo4j（`docker compose up -d neo4j`）：
+集成测试需要 Neo4j（`docker compose up -d neo4j`）；只跑集成档要加 `--no-cov`（单跑必然跌破覆盖率门槛，那不是真信号）：
 
 ```bash
-cd backend && uv run pytest -m integration
+cd backend && uv run pytest -m integration --no-cov
 ```
+
+CI（`.github/workflows/ci.yml`）：unit job 跟每次 push/PR；integration job 在 main push 时自带 Neo4j + MinIO 跑集成档（含离线检索评测档）。
+
+检索质量评测（M17 双层基线，详见 `docs/retrieval-baseline.md`）：
+
+```bash
+cd backend && uv run pytest tests/test_retrieval_eval.py -m eval --no-cov   # 离线确定性档（行为漂移守卫）
+cd backend && uv run python scripts/eval_retrieval.py                        # 真实模型档（手动，产生 API 费用）
+```
+
+注意：跑测试请在 `backend/` 目录下执行；conftest 有护栏保证从任何目录跑都不会加载真实 `.env`，但习惯上仍以 `backend/` 为准。
 
 ## OpenSpec 工作流
 
 ```bash
-openspec status --change m4-incremental-impact
+openspec status --change m17-test-baseline
 ```
 
 继续实施 `/opsx:apply`；验证 `/opsx:verify`；归档 `/opsx:archive`。

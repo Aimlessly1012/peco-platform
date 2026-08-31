@@ -26,8 +26,8 @@ from app.services.report.graph_reader import (
 from app.services.report.mermaid_check import validate_mindmap
 from app.services.report.mindmap import build_mindmap
 from app.services.report.service import build_report
-from tests.test_pipeline_integration import _index_fixture
-from tests.test_report import GOOD_SEQ, FakeLLM
+from tests.helpers.fixture_graph import index_fixture_repo
+from tests.helpers.report import GOOD_SEQ, FakeLLM
 
 pytestmark = pytest.mark.integration
 
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 async def indexed_project(fake_embedder, fake_summarizer):
     await ensure_vector_index()
     pid = f"test-{uuid.uuid4().hex[:8]}"
-    files, chunks, modules, api_edges = await _index_fixture(pid, fake_embedder, fake_summarizer)
+    files, chunks, modules, api_edges = await index_fixture_repo(pid, fake_embedder, fake_summarizer)
     yield pid, files, modules
     await delete_project_graph(pid)
     await close_driver()
@@ -142,7 +142,7 @@ async def test_project_isolation(indexed_project, fake_embedder, fake_summarizer
     pid, _, _ = indexed_project
     other = f"test-{uuid.uuid4().hex[:8]}"
     try:
-        await _index_fixture(other, fake_embedder, fake_summarizer)
+        await index_fixture_repo(other, fake_embedder, fake_summarizer)
         tree = await read_project_tree(pid)
         other_tree = await read_project_tree(other)
 

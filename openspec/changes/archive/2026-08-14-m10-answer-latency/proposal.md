@@ -1,5 +1,10 @@
 # M10: 聊天首答提速（模型分工 + 上下文预算）
 
+> **归档说明（M17，2026-08-31）**：本 change 原误置于 `backend/openspec/changes/`，
+> 2026-08-28 的 M6–M16 批量归档因此漏掉了它。其 delta 所用的 requirement 标题与现行主
+> spec 结构不符，未做机械 sync——两条需求（上下文预算裁剪、生成与离线模型分流）已由
+> M17（m17-test-baseline）的 code-chat delta 按现行结构补录进主 spec。本目录仅存档原文。
+
 ## Why
 
 M9 上线后测得公网首 token 61.9s、完整回答 65.5s，用户体感"卡住"。分阶段量化后定位：

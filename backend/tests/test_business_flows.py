@@ -15,7 +15,7 @@ from app.services.report.flows import (
 )
 from app.services.report.graph_reader import FileNode, ModuleNode, ProjectTree
 from app.services.report.mermaid_check import validate_flowchart
-from tests.test_report import GOOD_FLOW_OUTPUT, FakeLLM
+from tests.helpers.report import GOOD_FLOW_OUTPUT, FakeLLM
 
 GOOD_FLOW = """flowchart TD
     A[用户选择商品] --> B[提交订单]

@@ -19,7 +19,7 @@ from app.services.report.features import (
     validate_groups,
 )
 from app.services.report.graph_reader import FileNode, ModuleNode, ProjectTree
-from tests.test_report import FakeLLM
+from tests.helpers.report import FakeLLM
 
 
 def big_tree(count: int = 12) -> ProjectTree:

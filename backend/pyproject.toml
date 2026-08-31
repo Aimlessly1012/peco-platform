@@ -37,13 +37,34 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "aiosqlite>=0.20",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-socket>=0.8.1",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# 全局超时：挂死的用例被中断而不是卡住整轮。集成档由 conftest 的
+# pytest_collection_modifyitems 放宽到 300s（起容器/建图本来就慢）
+timeout = 120
+# --disable-socket 只放行本机：单测档不许打任何外网（误配 key 也打不出去）。
+# 集成 marker 会由 conftest 逐条重新放开（design D6）
+# 覆盖率跟着单测档一起出；只跑 -m integration 时请加 --no-cov，
+# 否则覆盖率必然跌破 fail_under
+addopts = [
+    "--disable-socket",
+    "--allow-hosts=127.0.0.1,::1,localhost",
+    "--cov=app",
+    "--cov-report=term-missing:skip-covered",
+    # M17 1.6 基线：2026-08-31 单测档实测 78.30%，向下取整写死。
+    # 这是防跌 ratchet，不是高门槛——上调必须是显式改动（design D5）
+    "--cov-fail-under=78",
+]
 markers = [
-    "integration: 需要 docker compose 环境（Neo4j/Postgres）的集成测试",
+    "integration: 需要 docker compose 环境（Neo4j/MinIO）的集成测试",
+    # M17 组 3 的检索评测档在用；注册一下免得 PytestUnknownMarkWarning 刷屏
+    "eval: 检索质量评测（离线确定性档）",
 ]
 
 [build-system]

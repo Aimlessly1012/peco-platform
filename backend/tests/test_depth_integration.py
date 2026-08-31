@@ -13,7 +13,7 @@ from app.services.ingest.pipeline import MODE_AUTO, MODE_FULL, run_index_job
 from app.services.ingest.summarizer import summarizer
 from app.services.report.llm import report_llm
 from sqlalchemy import select
-from tests.test_incremental_integration import make_source_repo
+from tests.helpers.repos import make_source_repo
 
 pytestmark = pytest.mark.integration
 
