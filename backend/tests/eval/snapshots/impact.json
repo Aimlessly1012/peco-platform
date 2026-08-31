@@ -46,8 +46,8 @@
       "{project}:frontend/lib/api.ts:apiPost:6",
       "{project}:frontend/pages/orders.tsx:(module):1",
       "{project}:frontend/pages/orders.tsx:OrdersPage:11",
-      "{project}:backend/routers/orders.py:create_order:15",
-      "{project}:backend/routers/orders.py:list_orders:9"
+      "{project}:frontend/pages/orders.tsx:Order:5",
+      "{project}:frontend/components/OrderCard.tsx:Props:1"
     ],
     "impact-05": [
       "{project}:backend/models.py",

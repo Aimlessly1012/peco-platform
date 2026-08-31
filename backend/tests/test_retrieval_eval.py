@@ -17,15 +17,24 @@ top1 是 list_users），指标数值毫无意义。召回质量由真实模型�
     WITH node, score LIMIT $top_k                                  ← 截断排在前面
     <retrieval_query 里的 project 过滤>                             ← 过滤排在后面
 
-而 fixture 仓在每个项目里的 fake 向量完全相同（fake_embed 只看文本）。库里每多一份
-同构的评测图，就有一批分数完全并列的节点跟本项目抢这个全局窗口的名额，各路实际召回
-到的条数随之变化，RRF 排名跟着变——表现就是快照序列莫名漂移。实测：库干净时连跑 6
-次全绿，人为留下 2 份同构残留后连跑 3 次全红。所以 indexed_project 建图前会先清掉
-库中所有 `eval-*` 项目（见 _purge_eval_residue）。
+而窗口是全局的意味着：**库里任何其他项目的节点都在跟本项目抢名额**——同构的评测残留
+（分数完全并列）会，真实项目的真嵌入向量也会。各路实际召回到的条数随之变化，RRF 排名
+跟着变——表现就是快照序列莫名漂移。实测两例：①库干净时连跑 6 次全绿，人为留下 2 份
+同构残留后连跑 3 次全红；②M17 上线时快照在本机脏库（有一个真实项目）生成，本机连跑
+全绿、CI 干净库上 global/impact 两档漂移必红。
 
-重建基线快照（改动检索链后确认变化符合预期，再提交 diff 供评审）：
+因此本档的口径是：**快照以干净库为唯一权威**。indexed_project 建图前先清掉 `eval-*`
+残留（_purge_eval_residue，自己的命名空间）；若库里还存在任何非 eval-* 项目（真实项目
+或其他测试残留，_foreign_projects），比对模式自动 skip（本机脏库跑出的红灯是假信号），
+重建模式直接 fail（脏库重建出的基线就是污染源）。CI 的库天然干净，永远真跑。
 
-    cd backend && EVAL_UPDATE_SNAPSHOT=1 uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q
+重建基线快照（必须干净库；改动检索链后确认变化符合预期，再提交 diff 供评审）：
+
+    docker run -d --name m17-eval-neo4j -p 7999:7687 -e NEO4J_AUTH=neo4j/ragcoder123 \
+        -e 'NEO4J_PLUGINS=["apoc"]' neo4j:5.26-community   # 建图用到 apoc.create.addLabels
+    cd backend && NEO4J_URI=bolt://localhost:7999 EVAL_UPDATE_SNAPSHOT=1 \
+        uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q
+    docker rm -f m17-eval-neo4j
 """
 import json
 import os
@@ -75,6 +84,22 @@ async def _purge_eval_residue() -> list[str]:
     for pid in pids:
         await delete_project_graph(pid)
     return sorted(pids)
+
+
+async def _foreign_projects() -> list[str]:
+    """库中所有非 `eval-*` 的项目（真实项目或其他测试残留）。
+
+    向量召回窗口是全局的（见模块 docstring），任何外来节点都会挤占名额，让序列
+    与干净库（CI）不可比。外来项目不是我们的数据，不能删，只能拒跑。
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            "MATCH (n) WHERE n.project_id IS NOT NULL "
+            "AND NOT n.project_id STARTS WITH 'eval-' "
+            "RETURN DISTINCT n.project_id AS pid LIMIT 10"
+        )
+        return sorted([record["pid"] async for record in result])
 
 
 @pytest.fixture(scope="module")
@@ -147,6 +172,18 @@ async def indexed_project(offline_config):
     residue = await _purge_eval_residue()
     if residue:
         print(f"\n[eval] 清掉库中残留的评测项目（会导致序列漂移）：{residue}")
+    foreign = await _foreign_projects()
+    if foreign:
+        await close_driver()
+        if UPDATE:
+            pytest.fail(
+                f"重建基线必须在干净 Neo4j 上进行（快照以干净库为权威口径），"
+                f"当前库里有其他项目：{foreign}。用一次性容器重建，见模块 docstring。"
+            )
+        pytest.skip(
+            f"库不干净（存在非 eval-* 项目：{foreign}），离线快照与干净库不可比，"
+            f"跳过以免假红灯。此档以 CI 的干净库为权威；本机想跑见模块 docstring 的一次性容器。"
+        )
     pid = f"eval-{uuid.uuid4().hex[:8]}"
     with (
         patch.object(type(embedder_module.embedder), "embed_texts", FakeEmbedder.embed_texts),
@@ -213,11 +250,11 @@ async def test_offline_snapshot(eval_results, question_type):
         if missing:
             report.append(f"\n快照里有但本次没跑到的 query: {missing}")
         report.append(
-            "\n先排除环境因素：库里若存在同构的其他 fixture 图（分数完全并列，"
-            "跟本项目抢全局召回窗口），序列会漂但不是代码问题。诊断——\n"
-            "  MATCH (f:File) WHERE f.name ENDS WITH ':backend/routers/orders.py'\n"
-            "  RETURN DISTINCT f.project_id\n"
-            "本档已自动清理 eval-* 残留；若查出别的项目也有这套 fixture 文件，先清掉再重跑。"
+            "\n先排除环境因素：库里任何其他项目的节点都会挤占全局召回窗口（见模块"
+            " docstring），序列会漂但不是代码问题。本档已自动清理 eval-* 残留并在"
+            "存在外来项目时 skip——如果你看到这条失败，说明库在建图后中途被写入了"
+            "新项目，或检索行为真的变了。诊断残留：\n"
+            "  MATCH (n) WHERE n.project_id IS NOT NULL RETURN DISTINCT n.project_id"
         )
         report.append(
             "\n若变化符合预期：cd backend && EVAL_UPDATE_SNAPSHOT=1 "

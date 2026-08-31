@@ -29,9 +29,15 @@ query 的 top-8，第 5～8 位是两两精确并列的 `0.016393442623` 与 `0.
 被消掉的只有「分数相同、上游顺序抖动」这类假信号；分数真变了顺序照样变，守卫依然有效
 （验证方式：手改快照里任意两项的位置，用例必红并列出前后序列）。
 
-### 库里不能有同构的其他项目
+### 库里不能有任何其他项目（不只是同构的）
 
-这一档真正的脆弱点在这里，比并列抖动严重得多，**重建快照前务必先确认库是干净的**。
+这一档真正的脆弱点在这里，比并列抖动严重得多：**快照以干净库为唯一权威口径**。
+M17 上线时踩过实弹——快照在本机脏库（有一个真实项目）生成，本机连跑全绿，CI 干净库上
+global/impact 两档必红。真实项目的真嵌入向量同样挤占全局召回窗口，不需要「同构」。
+
+夹具因此带守卫（`_foreign_projects`）：库里存在非 `eval-*` 项目时，比对模式自动 skip
+（本机脏库的红灯是假信号），重建模式直接 fail（脏库重建出的基线就是污染源）。CI 的库
+天然干净，永远真跑——本地跑不跑得上不影响门禁。
 
 `Neo4jVector` 生成的 Cypher 长这样（见 `vector_store.py` 模块注释第 1 条）：
 
@@ -59,11 +65,18 @@ WITH node, score LIMIT $top_k                                  -- 截断排在�
 
 ```bash
 cd backend
-uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q      # 比对基线
-EVAL_UPDATE_SNAPSHOT=1 uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q   # 重建基线
+uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q      # 比对基线（库不干净会 skip）
 ```
 
-空 Neo4j 上直接跑即可，fixture 会自动建图，无手工准备步骤。重建后的快照 diff 要随 PR 评审。
+重建基线必须用干净库（一次性容器，用完即删）：
+
+```bash
+docker run -d --name m17-eval-neo4j -p 7999:7687 -e NEO4J_AUTH=neo4j/ragcoder123 -e 'NEO4J_PLUGINS=["apoc"]' neo4j:5.26-community
+cd backend && NEO4J_URI=bolt://localhost:7999 EVAL_UPDATE_SNAPSHOT=1 uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q
+docker rm -f m17-eval-neo4j
+```
+
+空 Neo4j 上 fixture 会自动建图，无手工准备步骤。重建后的快照 diff 要随 PR 评审。
 
 快照按 question_type 分文件：`backend/tests/eval/snapshots/{local,global,impact}.json`。
 
