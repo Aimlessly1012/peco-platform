@@ -504,6 +504,9 @@ const HEADER = `// ⚠️ 本文件由 scripts/gen-heitu-reference.mjs 生成，
 // 要改内容请改 curation.ts（策展清单与说明覆盖层），然后重跑：
 //     npm run gen:reference
 //
+// 升级 heitu 之后同样要重跑——那时没人会去碰 curation.ts，产物却已经对不上新版本了。
+// 校验用 npm run check:reference，退出码即结论。
+//
 // 与 app/fonts.css 同属「脚本生成、产物入库」的既有约定。产物入库不只是为了
 // 构建期不依赖脚本——heitu 升级时字段变化会直接出现在 PR 的 diff 里，
 // 「新增 smooth」「point 类型变了」一眼可见；构建期生成则完全不可见。

@@ -45,6 +45,22 @@ npm run dev
 | Postgres | 复用 RAG 那套 compose 的库（默认 `localhost:5433`）；`npm run migrate` 会建 `platform_users` 表 |
 | RAG 后端 | 页面直连同域 `/rag/api/*`（nginx 剥前缀转 FastAPI）。本地后端跑在别的端口时用 `NEXT_PUBLIC_RAG_API_BASE` 覆盖 |
 
+### /front 的字段说明
+
+四个 tab 的字段表是脚本从 `node_modules/heitu` 的 `.d.ts` 提取生成的，不是手写的：
+
+```bash
+npm run gen:reference     # 重新生成产物
+npm run check:reference   # 只读校验：产物是否最新 + 人写条目是否全部生效，退出码即结论
+```
+
+`app/front/reference/curation.ts` 由人写（展示哪些字段、以及源里没有 TSDoc 时的中文说明），
+`generated.ts` 是脚本产物、**不要手改**。
+
+**升级 heitu 之后必须重跑**——注意这个触发条件容易被漏掉：升级时没人会去碰 `curation.ts`，
+但产物已经过期，页面上的说明仍停留在旧版本。这条约定目前没有任何自动强制（本仓库无 CI），
+`check:reference` 的退出码是唯一的机械判据。
+
 ### 路由与访问控制
 
 | 路由 | 谁能进 |
