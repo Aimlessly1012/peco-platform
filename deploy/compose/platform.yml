@@ -10,6 +10,11 @@
 #
 # 相对路径基准是本文件所在目录（deploy/compose/），与 rag.yml 一致——
 # compose 的 include 默认以被包含文件自身的目录解析相对路径。
+#
+# **本文件不含宿主端口与 restart**：基线即生产安全形态（deployment spec）。
+# 平台的 `127.0.0.1:3200` 与 `restart: unless-stopped` 在 prod.yml 里。
+# 回环绑定本身确实不暴露公网，但「基线零端口」之所以有效正在于它零例外——
+# 一旦改成「基线只放安全的端口」，每加一条都要判断什么算安全，而判断会出错。
 services:
   platform:
     # 构建上下文是仓库根：Dockerfile 与 .dockerignore 都在那里。
@@ -19,12 +24,9 @@ services:
     env_file: ../../.env.production
     environment:
       NODE_ENV: production
-    ports:
-      # 只绑回环，公网流量一律经 nginx——与并入前的策略一致，不因换栈而放开
-      - "127.0.0.1:3200:3000"
     depends_on:
       # 并入同栈才表达得了：平台要写 platform_users，db 没起来时启动没有意义。
       # db 定义在伞文件里（平台与 RAG 共用），那里有 healthcheck。
+      # 这一条留在基线：它是服务间的依赖关系，不是环境差异。
       db:
         condition: service_healthy
-    restart: unless-stopped
