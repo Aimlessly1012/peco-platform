@@ -14,8 +14,9 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 # Next standalone 用 HOSTNAME 决定监听地址，容器里它默认是容器 ID，
 # 多网络时会只绑其中一个网段导致 nginx 502（RAG 前端踩过，见 deploy/server-notes）
 ENV HOSTNAME=0.0.0.0 PORT=3000
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# build 阶段的 distDir 是 .next-build（.next 留给 dev，见 next.config.ts）
+COPY --from=builder /app/.next-build/standalone ./
+COPY --from=builder /app/.next-build/static ./.next-build/static
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
 EXPOSE 3000

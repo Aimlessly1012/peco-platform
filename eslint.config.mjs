@@ -30,8 +30,15 @@ const eslintConfig = defineConfig([
     // .venv 里 338M 第三方 JS。平台的 lint / tsc 都不该看这里——
     // git 有 services/rag/.gitignore 挡着，但 eslint 与 tsc 不读 .gitignore。
     "services/**",
+    // Claude 的 worktree 会把整仓源码复制到 .claude/worktrees/<name>/ 下，
+    // 根相对的忽略模式（services/** 等）罩不住这些嵌套副本——不排除的话
+    // eslint 会把整个仓库再扫一遍（实测 221 个文件、两万余条）
+    ".claude/**",
     // Default ignores of eslint-config-next:
     ".next/**",
+    // build 的 distDir（与 dev 分离，见 next.config.ts）——默认忽略只认 .next/**，
+    // 不加这条 eslint 会去扫 build 产物（实测 4.5 万个问题）
+    ".next-build/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

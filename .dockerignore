@@ -5,6 +5,7 @@
 # 其中 .venv 一个目录就 338M——不排除的话全部进 Next 镜像，而 Next 一个字节也用不到。
 node_modules
 .next
+.next-build
 .git
 .env.local
 npm-debug.log
