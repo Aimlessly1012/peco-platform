@@ -85,7 +85,7 @@ npm run check:reference   # 只读校验：产物是否最新 + 人写条目是�
 | 1 | 建页面目录 `app/<key>/` | `check:middleware` 报错——注册表登记了但目录不存在 |
 | 2 | 建后端目录 `services/<key>/`（纯前端项目跳过） | 无机械检查 |
 | 3 | 建 `deploy/nginx/projects/<key>.conf`，写该项目的 `location` | 无机械检查；路由 404 |
-| 4 | 建 `deploy/compose/<key>.yml`，在 `deploy/docker-compose.yml` 的 `include` 加一行 | 无机械检查；服务起不来 |
+| 4 | 建 `deploy/compose/<key>.yml`，在 `deploy/docker-compose.yml` 的 `include` 加一行 | `check:middleware` 非零退出，并分别指出是缺文件还是缺 `include` 行 |
 | 5 | 在 `lib/projects.ts` 加一行（`key`/`label`/`route`/`access`/`backend`，作品集项目再加 `showcase`） | 导航与首页不出现该项目 |
 | 6 | 非 public 项目：在 `middleware.ts` 的 `matcher` 加**两条**——`/<key>` 与 `/<key>/:path*` | `check:middleware` 非零退出并指明缺哪条 |
 | 7 | 后端按 `project-onboarding` spec 验平台 JWS（HS256，claim `githubId`/`role`/`status`） | 无机械检查；接口裸奔 |
@@ -104,7 +104,12 @@ npm run check:reference   # 只读校验：产物是否最新 + 人写条目是�
 `proxy_cache off`、`proxy_set_header Connection ""`，外加放宽的 `proxy_read_timeout`。
 缺任何一条，流式响应会被 nginx 缓冲成「一次性返回」，前端表现为一直转圈。
 
-表里「无机械检查」的四步只能靠人——守卫覆盖的是**登记类**的遗漏（目录在不在、matcher 全不全），
-覆盖不了配置内容对不对。
+**第 4 步为什么也要守卫**：nginx 那边是 `include projects/*.conf` 通配的，丢个 conf 进去自动生效；
+而 **compose 的 `include` 不支持通配符**，每个带后端的项目都得手工往列表里加一行——又一处
+「手写 + 每个项目重复一次 + 漏了不报错」，和 matcher 同类。
+
+表里「无机械检查」的三步只能靠人——守卫覆盖的是**登记类**的遗漏（目录在不在、matcher 全不全、
+compose 建没建且登记没登记），覆盖不了配置内容对不对：nginx conf 里写错上游地址、
+后端验签实现有 bug，机器都看不出来。这一栏的「无」只应随时间减少，不该增加。
 
 设计文档见 `openspec/`：平台自身在 `changes/`，RAG 的规格在 `specs/`。

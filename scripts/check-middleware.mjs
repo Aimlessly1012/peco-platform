@@ -33,6 +33,7 @@ const root = join(here, "..");
 
 const MIDDLEWARE = join(root, "middleware.ts");
 const REGISTRY = join(root, "lib/projects.ts");
+const UMBRELLA = join(root, "deploy/docker-compose.yml");
 
 function fail(message) {
   console.error(message);
@@ -85,6 +86,42 @@ function extractMatcher(sourceFile) {
   fail("middleware.ts 里找不到 export const config。");
 }
 
+/**
+ * 提取伞文件的 include 列表。
+ *
+ * 为什么要查它：nginx 那边是 `include projects/*.conf` 通配的，丢个 conf 进去就生效；
+ * 而 **compose 的 include 不支持通配符**（实测把 `compose/*.yml` 当字面路径 open 并报错），
+ * 所以每个带后端的项目都要手工往列表里加一行——又一处「手写 + 会重复 + 漏了不报错」，
+ * 与 matcher 同类，同样需要机器盯着。第 4 组的 dry-run 就是这么发现它的。
+ *
+ * 手写小解析器而不是引 YAML 依赖：只需要读一个固定形状的列表。代价是形态一超出
+ * 就看不懂——那时报错，不猜。
+ */
+function extractIncludes(text) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => /^include:\s*$/.test(line));
+  if (start === -1) {
+    fail(`${relative(root, UMBRELLA)} 里找不到顶层的 include: 块，无法校验各项目的 compose 登记。`);
+  }
+
+  const items = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\S/.test(line)) break; // 回到顶层缩进，块结束
+    if (/^\s*(#|$)/.test(line)) continue; // 注释与空行
+    const matched = line.match(/^\s*-\s*(\S+)\s*$/);
+    if (!matched || !/\.ya?ml$/.test(matched[1])) {
+      fail(
+        `${relative(root, UMBRELLA)} 的 include 块里有读不懂的一行：\n    ${line.trim()}\n` +
+          `本脚本只认 \`- path/to/file.yml\` 这一种写法（对象式 \`- path:\` 与通配都不支持）。` +
+          `确有需要就改这里的解析，别让它静默放过。`
+      );
+    }
+    items.push(matched[1]);
+  }
+  return items;
+}
+
 /** 注册表也用 AST 读：它是 .ts，Node 直接 import 不了（同 gen-heitu-reference 的处境）。 */
 async function readRegistry() {
   const transpiled = ts.transpileModule(readFileSync(REGISTRY, "utf8"), {
@@ -113,6 +150,7 @@ const sourceFile = ts.createSourceFile(
   true
 );
 const matcher = extractMatcher(sourceFile);
+const includes = extractIncludes(readFileSync(UMBRELLA, "utf8"));
 const projects = await readRegistry();
 
 const errors = [];
@@ -127,6 +165,32 @@ for (const project of projects) {
     errors.push(
       `${key}\n    注册表声明了 route ${route}，但 app/${key}/ 不存在——导航会指向 404。`
     );
+  }
+
+  // 带后端的项目：compose 文件要在，且要被伞文件 include。
+  // 两种漏法分开报——修法不同：一个是建文件，一个是往列表加一行。
+  if (project.backend) {
+    const rel = `compose/${key}.yml`;
+    const fileExists = existsSync(join(root, "deploy", rel));
+    const included = includes.includes(rel);
+
+    if (!fileExists && !included) {
+      errors.push(
+        `${key}\n    注册表声明 backend: true，但 deploy/${rel} 不存在，` +
+          `伞文件也没有 include 它——两步都缺：先建文件，再往 include 加一行。`
+      );
+    } else if (!fileExists) {
+      errors.push(
+        `${key}\n    伞文件 include 了 ${rel}，但 deploy/${rel} 不存在——` +
+          `compose 会直接启动失败。建这个文件，或从 include 里去掉这行。`
+      );
+    } else if (!included) {
+      errors.push(
+        `${key}\n    deploy/${rel} 存在，但伞文件的 include 列表里没有它——服务不会被起起来。\n` +
+          `    在 ${relative(root, UMBRELLA)} 的 include 下加一行：  - ${rel}\n` +
+          `    （compose 的 include 不支持通配符，只能手写，所以这里替你盯着。）`
+      );
+    }
   }
 
   if (access === "public") continue;
@@ -167,7 +231,10 @@ if (errors.length > 0) {
 }
 
 const guarded = projects.filter((p) => p.access !== "public");
+const backed = projects.filter((p) => p.backend);
 console.log(
   `检查通过：${guarded.length} 个受保护项目（${guarded.map((p) => p.key).join("、")}）` +
-    `的 matcher 覆盖完整，共 ${matcher.length} 条。`
+    `的 matcher 覆盖完整，共 ${matcher.length} 条；` +
+    `${backed.length} 个带后端的项目（${backed.map((p) => p.key).join("、")}）` +
+    `的 compose 文件已建且已 include。`
 );
