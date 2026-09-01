@@ -1,0 +1,50 @@
+# auth — 用户管理（M11）
+
+## ADDED Requirements
+
+### Requirement: 用户列表（仅管理员）
+系统 SHALL 提供 `GET /auth/users`（仅 admin，member 返回 403），返回全部用户：用户名、角色、
+注册时间、最后登录时间、是否已禁用、所用邀请码（由 invite_codes.used_by 反查，管理员初始
+账号无邀请码）、聊天会话数与提问数（用户维度聚合）。列表 SHALL 按注册时间倒序。
+
+#### Scenario: 管理员查看用户画像
+- **WHEN** admin 打开用户管理页
+- **THEN** 看到每个用户的角色、注册与最后登录时间、来源邀请码、会话与提问数量
+
+#### Scenario: member 无权查看
+- **WHEN** member 调用用户列表接口
+- **THEN** 403
+
+### Requirement: 禁用与恢复登录权限
+系统 SHALL 提供 `POST /auth/users/{id}/disable` 与 `POST /auth/users/{id}/enable`（仅 admin）。
+禁用 SHALL 记录 disabled_at；被禁用用户 SHALL 立即无法通过守卫（即使其 JWT 尚未过期），
+且无法登录（返回与密码错误相同的 401 文案，不泄露账号状态）。恢复后 SHALL 立即可用。
+禁用 SHALL NOT 删除该用户的会话、消息或其创建的项目。
+
+管理员 SHALL NOT 禁用自己，也 SHALL NOT 禁用最后一个处于启用状态的 admin（返回 400 并说明原因）。
+
+#### Scenario: 禁用即刻生效
+- **WHEN** 某 member 持有有效 JWT，管理员将其禁用
+- **THEN** 该用户的下一个业务请求返回 401，无需等待 token 过期
+
+#### Scenario: 禁用不丢数据
+- **WHEN** 用户被禁用后再恢复
+- **THEN** 其历史会话与消息完好，可继续使用
+
+#### Scenario: 防自锁
+- **WHEN** 管理员尝试禁用自己或最后一个启用的 admin
+- **THEN** 400，且账号状态不变
+
+#### Scenario: MCP 不受影响
+- **WHEN** 账号被禁用，但编码 agent 使用 MCP_AUTH_TOKEN 接入
+- **THEN** MCP 行为不变（独立鉴权体系）
+
+## MODIFIED Requirements
+
+### Requirement: 邀请码注册与登录
+（M8 原文保持）登录成功时 SHALL 记录 last_login_at。被禁用账号登录 SHALL 返回
+401「用户名或密码不正确」（与错误密码同一文案，不泄露账号是否存在或被禁）。
+
+#### Scenario: 被禁用账号无法登录
+- **WHEN** 被禁用用户输入正确密码登录
+- **THEN** 401，文案与密码错误一致

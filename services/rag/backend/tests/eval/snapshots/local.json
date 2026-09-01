@@ -1,0 +1,123 @@
+{
+  "config": {
+    "retrieval_top_k": 8,
+    "rerank_enabled": false,
+    "rerank_model": "",
+    "rerank_candidate_multiplier": 3,
+    "embedding_model": "text-embedding-v3",
+    "embedding_dim": 1024,
+    "eval_top_k": 8
+  },
+  "queries": {
+    "local-01": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:(module):1"
+    ],
+    "local-02": [
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:frontend/pages/orders.tsx:(module):1",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:get_user:13",
+      "{project}:backend/routers/users.py:(module):1"
+    ],
+    "local-03": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/lib/api.ts:apiPost:6",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11"
+    ],
+    "local-04": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:get_user:13",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11"
+    ],
+    "local-05": [
+      "{project}:backend/models.py",
+      "{project}:backend/models.py:Order:11",
+      "{project}:backend/models.py:OrderItem:4",
+      "{project}:backend/routers/orders.py",
+      "{project}:backend/services/order_service.py:OrderService:4",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:frontend/components/OrderCard.tsx:OrderCard:5",
+      "{project}:frontend/pages/orders.tsx:Order:5"
+    ],
+    "local-06": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:(module):1"
+    ],
+    "local-07": [
+      "{project}:backend/main.py",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/main.py:(module):1",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11"
+    ],
+    "local-08": [
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:frontend/pages/orders.tsx:(module):1",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:get_user:13",
+      "{project}:backend/routers/users.py:(module):1"
+    ],
+    "local-09": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:(module):1"
+    ],
+    "local-10": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:(module):1"
+    ],
+    "local-11": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/pages/orders.tsx:OrdersPage:11",
+      "{project}:backend/routers/orders.py:(module):1"
+    ]
+  }
+}

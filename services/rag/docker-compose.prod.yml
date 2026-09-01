@@ -1,0 +1,126 @@
+# 生产部署（M7 D4）：与 Nginx 子路径 /rag 配套，和服务器上已有的 compose 项目共存。
+#
+# 与开发版 docker-compose.yml 的差别：
+#   - postgres / neo4j 不映射宿主端口（只在 compose 网络内互通，不对外暴露）
+#   - backend 只绑 127.0.0.1，流量一律经 Nginx 进来（前端已并入 peco-platform）
+#   - restart: unless-stopped；没有源码卷挂载，跑的就是镜像里的代码
+#
+# 启动：docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: raguser
+      POSTGRES_PASSWORD: ragpass
+      POSTGRES_DB: ragcoder
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raguser -d ragcoder"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/ragcoder123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      # 4096 维向量；默认按 4G 小机保守配置，大内存服务器建议调到 2G/1G
+      NEO4J_server_memory_heap_max__size: 768M
+      NEO4J_server_memory_pagecache_size: 384M
+    volumes:
+      - neo4jdata:/data
+    restart: unless-stopped
+    # 需要开 Neo4j Browser 排查时临时加：ports: ["127.0.0.1:7474:7474"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+      # Nginx 已剥掉 /rag/api 前缀，这里只用于 openapi.json / docs 的地址生成
+      ROOT_PATH: /rag/api
+    volumes:
+      - ./data/repos:/data/repos     # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
+    ports:
+      - "127.0.0.1:8001:8000"        # 只监听回环，公网流量必须过 Nginx
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      # 启动时要把孤儿 RUNNING 任务重新入队（M13 2.3），broker 得先在
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./deploy/rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
+    restart: unless-stopped
+    # 内存水位（192MiB）写在挂进去的 rabbitmq.conf 里：relative 会按宿主 3.6G 算，
+    # 那样这里的 mem_limit 只会变成一记 OOM kill
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ragminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
+    volumes:
+      - miniodata:/data
+    restart: unless-stopped
+    mem_limit: 256m
+    # 不对外暴露端口：只有 compose 网络内的 backend/worker 用它。
+    # 要开控制台排查时临时加：ports: ["127.0.0.1:9101:9001"]
+
+  worker:
+    build: ./backend
+    # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
+    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+    volumes:
+      - ./data/repos:/data/repos     # 与 backend 共享同一任务级临时区（M16 后非持久层）
+    restart: unless-stopped
+    # 索引大仓时实测 400~600MB（design 内存账），768 留一档余量；
+    # 超限被杀的只是 worker，任务由 acks_late 重投递续跑
+    mem_limit: 768m
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+
+volumes:
+  pgdata:
+  neo4jdata:
+  rabbitmqdata:
+  miniodata:

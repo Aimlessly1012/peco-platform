@@ -1,0 +1,4 @@
+{
+  "name": "umi-config-demo",
+  "dependencies": { "umi": "^3.5.0", "react": "^17.0.2" }
+}

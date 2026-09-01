@@ -1,0 +1,17 @@
+# 服务器 override（M12 起）：RAG 自持 80 端口的 nginx 入口。
+#
+# 历史（前端已于 M12 阶段三并入 peco-platform，此处只剩 nginx）：M7 部署时 80 被 zc_erp 占着，RAG 只能把前后端挂进 zc_erp_default
+# 网络、把路由寄在它的 nginx 里。zc_erp 下线后不再需要外部网络，入口收归自己。
+#
+# 用法：docker compose -f docker-compose.prod.yml -f docker-compose.server.yml up -d
+services:
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    depends_on:
+      - backend

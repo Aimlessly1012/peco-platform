@@ -1,0 +1,4 @@
+{
+  "name": "umi-convention-demo",
+  "dependencies": { "@umijs/max": "^4.1.0", "react": "^18.2.0" }
+}

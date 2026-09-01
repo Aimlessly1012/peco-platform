@@ -1,0 +1,73 @@
+{
+  "config": {
+    "retrieval_top_k": 8,
+    "rerank_enabled": false,
+    "rerank_model": "",
+    "rerank_candidate_multiplier": 3,
+    "embedding_model": "text-embedding-v3",
+    "embedding_dim": 1024,
+    "eval_top_k": 8
+  },
+  "queries": {
+    "global-01": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ],
+    "global-02": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ],
+    "global-03": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ],
+    "global-04": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ],
+    "global-05": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ],
+    "global-06": [
+      "{project}:backend/routers/users.py:list_users:8",
+      "{project}:backend/routers/orders.py:list_orders:9",
+      "{project}:backend/routers/users.py:(module):1",
+      "{project}:frontend/components/OrderCard.tsx",
+      "{project}:module:shared:shared",
+      "{project}:backend/main.py:health:11",
+      "{project}:backend/routers/users.py",
+      "{project}:module:page:home"
+    ]
+  }
+}
