@@ -14,7 +14,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./deploy/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro
       # HTTPS（baotao.wang）：证书与 ACME webroot 都在宿主机，certbot 续期后
       # 由 renewal-hooks/deploy 里的脚本 reload 本容器
       - /etc/letsencrypt:/etc/letsencrypt:ro

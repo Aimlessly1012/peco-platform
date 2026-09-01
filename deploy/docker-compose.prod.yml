@@ -42,8 +42,8 @@ services:
       retries: 30
 
   backend:
-    build: ./backend
-    env_file: .env
+    build: ../services/rag
+    env_file: ../services/rag/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
       NEO4J_URI: bolt://neo4j:7687
@@ -51,7 +51,7 @@ services:
       # Nginx 已剥掉 /rag/api 前缀，这里只用于 openapi.json / docs 的地址生成
       ROOT_PATH: /rag/api
     volumes:
-      - ./data/repos:/data/repos     # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
+      - ../services/rag/data/repos:/data/repos     # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
     ports:
       - "127.0.0.1:8001:8000"        # 只监听回环，公网流量必须过 Nginx
     restart: unless-stopped
@@ -71,7 +71,7 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
-      - ./deploy/rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
+      - ./rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
     restart: unless-stopped
     # 内存水位（192MiB）写在挂进去的 rabbitmq.conf 里：relative 会按宿主 3.6G 算，
     # 那样这里的 mem_limit 只会变成一记 OOM kill
@@ -96,16 +96,16 @@ services:
     # 要开控制台排查时临时加：ports: ["127.0.0.1:9101:9001"]
 
   worker:
-    build: ./backend
+    build: ../services/rag
     # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
     command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
-    env_file: .env
+    env_file: ../services/rag/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
       NEO4J_URI: bolt://neo4j:7687
       REPOS_DIR: /data/repos
     volumes:
-      - ./data/repos:/data/repos     # 与 backend 共享同一任务级临时区（M16 后非持久层）
+      - ../services/rag/data/repos:/data/repos     # 与 backend 共享同一任务级临时区（M16 后非持久层）
     restart: unless-stopped
     # 索引大仓时实测 400~600MB（design 内存账），768 留一档余量；
     # 超限被杀的只是 worker，任务由 acks_late 重投递续跑
@@ -119,8 +119,15 @@ services:
         condition: service_healthy
 
 
+# ⚠️ 四个卷显式固定原名。compose 项目名默认取目录名，合并进 peco-platform 后
+# 项目名变了，不写 name 就会创建一组全新空卷——线上数据会「看起来消失」。
+# 这是本次迁移唯一可能丢数据的地方（design R1），切换前必须 config 渲染核对。
 volumes:
   pgdata:
+    name: rag_coder_pgdata
   neo4jdata:
+    name: rag_coder_neo4jdata
   rabbitmqdata:
+    name: rag_coder_rabbitmqdata
   miniodata:
+    name: rag_coder_miniodata

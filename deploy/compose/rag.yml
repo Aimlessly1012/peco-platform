@@ -1,0 +1,105 @@
+# RAG Coder 服务栈（M16 并入 peco-platform 后从单体 compose 拆出）。
+#
+# 不含 db：Postgres 是平台与 RAG 共用的，定义在伞文件 deploy/docker-compose.yml 里，
+# 本文件的服务用服务名 `db` 引用它（include 合并到同一项目，跨文件可见）。
+#
+# ⚠️ 路径基准是本文件所在目录（deploy/compose/），不是仓库根——搬家后所有相对路径
+#    都重算过：`../../services/rag` 是后端源码，`../rabbitmq.conf` 是 deploy/ 下的配置。
+#
+# ⚠️ 四个数据卷全部显式写 `name:` 固定原名。compose 项目名默认取目录名，
+#    改名即等于换一组新空卷——原有数据会「看起来消失」。这是本次迁移唯一
+#    可能丢数据的地方，卷名里的 rag_coder_ 前缀是化石，不要「顺手改整齐」。
+
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/ragcoder123
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    volumes:
+      - neo4jdata:/data
+    ports:
+      - "7474:7474"   # Browser
+      - "7687:7687"   # Bolt
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build: ../../services/rag
+    env_file: ../../services/rag/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+    volumes:
+      - ../../services/rag/data/repos:/data/repos   # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
+    ports:
+      - "9200:8000"   # 宿主 9200（本机 8000/8001 已被其他服务占用）
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      # 启动时要把孤儿 RUNNING 任务重新入队（M13 2.3），broker 得先在
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      # 3.9 起这两个由 RabbitMQ 本体读取（镜像 entrypoint 已不再处理），仍是官方支持的写法
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ../rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
+    ports:
+      - "5673:5672"   # 宿主 5672 常被别的项目占用，这里错开
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ragminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9100:9000"   # S3 API
+      - "9101:9001"   # 控制台
+
+  worker:
+    build: ../../services/rag
+    # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
+    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
+    env_file: ../../services/rag/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
+      NEO4J_URI: bolt://neo4j:7687
+      REPOS_DIR: /data/repos
+    volumes:
+      - ../../services/rag/data/repos:/data/repos   # 与 backend 共享同一任务级临时区（M16 后非持久层）
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  neo4jdata:
+    name: rag_coder_neo4jdata
+  rabbitmqdata:
+    name: rag_coder_rabbitmqdata
+  miniodata:
+    name: rag_coder_miniodata

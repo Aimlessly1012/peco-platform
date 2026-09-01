@@ -69,7 +69,7 @@ server {
     server_name your-domain.com;
     # ...你已有项目的 location...
 
-    include /path/to/RAG_coder/deploy/nginx-rag.conf;
+    include /path/to/peco-platform/deploy/server-notes/nginx-rag.conf;
 }
 ```
 
@@ -77,7 +77,7 @@ server {
 nginx -t && nginx -s reload
 ```
 
-`deploy/nginx-rag.conf` 里 `/rag/api/` 那段的 `proxy_buffering off` 等三行**不能删**——
+`deploy/server-notes/nginx-rag.conf` 里 `/rag/api/` 那段的 `proxy_buffering off` 等三行**不能删**——
 SSE 经默认缓冲的反代会让聊天变成"一直转圈、最后整段蹦出来"，每行为什么存在都写在注释里了。
 
 ### 5. 验收清单

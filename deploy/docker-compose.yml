@@ -1,3 +1,24 @@
+# peco 全栈伞文件（M16 合并后的统一入口）。
+#
+# 结构：本文件只放 include 列表 + 共享基础设施（Postgres），各项目一个文件放
+# deploy/compose/ 下。这一步做到「按项目一个文件」即止——注册表、nginx 按项目
+# 拆 conf.d、接入清单归后续的 platform-project-slots。
+#
+# 为什么 db 在这里而不在 rag.yml：平台与 RAG 共用同一个 Postgres（平台写
+# platform_users，RAG 后端只读校验），它不属于任何单个项目。
+#
+# 项目名固定为 peco。注意**不要**为了让卷名对上而把项目名写成 rag_coder——
+# 那是把第一个房客的名字刻在楼上，后续项目会全住在错误的命名空间里。
+# 数据卷的原名由各文件里的卷级 `name:` 保证（见 rag.yml 的说明）。
+#
+# 用法：
+#   docker compose -f deploy/docker-compose.yml up -d
+name: peco
+
+include:
+  - compose/rag.yml
+  # - compose/platform.yml   # 3.4 交付后启用（平台服务并入同栈）
+
 services:
   db:
     image: postgres:16-alpine
@@ -15,94 +36,6 @@ services:
       timeout: 3s
       retries: 10
 
-  neo4j:
-    image: neo4j:5.26-community
-    environment:
-      NEO4J_AUTH: neo4j/ragcoder123
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: apoc.*
-    volumes:
-      - neo4jdata:/data
-    ports:
-      - "7474:7474"   # Browser
-      - "7687:7687"   # Bolt
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-
-  backend:
-    build: ./backend
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
-      NEO4J_URI: bolt://neo4j:7687
-      REPOS_DIR: /data/repos
-    volumes:
-      - ./data/repos:/data/repos   # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
-    ports:
-      - "9200:8000"   # 宿主 9200（本机 8000/8001 已被其他服务占用）
-    depends_on:
-      db:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      # 启动时要把孤儿 RUNNING 任务重新入队（M13 2.3），broker 得先在
-      rabbitmq:
-        condition: service_healthy
-
-  rabbitmq:
-    image: rabbitmq:3.13-alpine
-    environment:
-      # 3.9 起这两个由 RabbitMQ 本体读取（镜像 entrypoint 已不再处理），仍是官方支持的写法
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ragpass}
-    volumes:
-      - rabbitmqdata:/var/lib/rabbitmq
-      - ./deploy/rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
-    ports:
-      - "5673:5672"   # 宿主 5672 常被别的项目占用，这里错开
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ragminio}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
-    volumes:
-      - miniodata:/data
-    ports:
-      - "9100:9000"   # S3 API
-      - "9101:9001"   # 控制台
-
-  worker:
-    build: ./backend
-    # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
-    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
-      NEO4J_URI: bolt://neo4j:7687
-      REPOS_DIR: /data/repos
-    volumes:
-      - ./data/repos:/data/repos   # 与 backend 共享同一任务级临时区（M16 后非持久层）
-    depends_on:
-      db:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-
 volumes:
   pgdata:
-  neo4jdata:
-  rabbitmqdata:
-  miniodata:
+    name: rag_coder_pgdata
