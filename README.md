@@ -58,8 +58,8 @@ npm run check:reference   # 只读校验：产物是否最新 + 人写条目是�
 `generated.ts` 是脚本产物、**不要手改**。
 
 **升级 heitu 之后必须重跑**——注意这个触发条件容易被漏掉：升级时没人会去碰 `curation.ts`，
-但产物已经过期，页面上的说明仍停留在旧版本。这条约定目前没有任何自动强制（本仓库无 CI），
-`check:reference` 的退出码是唯一的机械判据。
+但产物已经过期，页面上的说明仍停留在旧版本。`check:reference` 已接入 CI
+（`.github/workflows/ci-platform.yml`），忘了重跑会在那里被拦下。
 
 ### 路由与访问控制
 
@@ -75,4 +75,36 @@ npm run check:reference   # 只读校验：产物是否最新 + 人写条目是�
 审核状态在 NextAuth 的 `jwt` 回调里**每次刷新都回库取最新值**——管理员批准或禁用后
 立刻生效，不用等 token 过期，对方也不必重新登录。
 
-设计文档见 RAG_coder 仓库的 `openspec/changes/m12-peco-platform/`。
+### 新增一个项目
+
+项目清单的唯一事实源是 `lib/projects.ts`。新增一个项目 = **新增几个文件 + 两处登记**，
+不改任何既有文件（注册表与 middleware 除外）。按序执行：
+
+| # | 做什么 | 漏了会怎样 |
+|---|---|---|
+| 1 | 建页面目录 `app/<key>/` | `check:middleware` 报错——注册表登记了但目录不存在 |
+| 2 | 建后端目录 `services/<key>/`（纯前端项目跳过） | 无机械检查 |
+| 3 | 建 `deploy/nginx/projects/<key>.conf`，写该项目的 `location` | 无机械检查；路由 404 |
+| 4 | 建 `deploy/compose/<key>.yml`，在 `deploy/docker-compose.yml` 的 `include` 加一行 | 无机械检查；服务起不来 |
+| 5 | 在 `lib/projects.ts` 加一行（`key`/`label`/`route`/`access`/`backend`，作品集项目再加 `showcase`） | 导航与首页不出现该项目 |
+| 6 | 非 public 项目：在 `middleware.ts` 的 `matcher` 加**两条**——`/<key>` 与 `/<key>/:path*` | `check:middleware` 非零退出并指明缺哪条 |
+| 7 | 后端按 `project-onboarding` spec 验平台 JWS（HS256，claim `githubId`/`role`/`status`） | 无机械检查；接口裸奔 |
+
+跑 `npm run check:middleware && npm run lint && npm run build` 收尾。
+
+**第 6 步必须两条**：`"/x/:path*"` 匹配不到 `/x` 裸路径本身——只写后者会让 `/x` 未登录直接
+放行，commit `6eaef3d` 实测踩过。matcher 无法从注册表生成（Next 要求它是静态字面量），
+所以这一步只能手写，守卫的存在就是为了盯它。
+
+**第 3 步的 conf 不要挂进 `/etc/nginx/conf.d/`**：nginx 默认 `include conf.d/*.conf` 会把
+那里的文件当顶层配置加载进 http 块，而项目 conf 是 `location` 片段、只能在 server 块里，
+挂错位置容器直接起不来。挂载点是 `/etc/nginx/projects/`，见 `docker-compose.server.yml`。
+
+**后端路由别忘了 SSE 三件套**（若该项目有流式接口）：`proxy_buffering off`、
+`proxy_cache off`、`proxy_set_header Connection ""`，外加放宽的 `proxy_read_timeout`。
+缺任何一条，流式响应会被 nginx 缓冲成「一次性返回」，前端表现为一直转圈。
+
+表里「无机械检查」的四步只能靠人——守卫覆盖的是**登记类**的遗漏（目录在不在、matcher 全不全），
+覆盖不了配置内容对不对。
+
+设计文档见 `openspec/`：平台自身在 `changes/`，RAG 的规格在 `specs/`。
