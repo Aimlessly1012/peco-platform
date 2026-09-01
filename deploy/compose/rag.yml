@@ -6,6 +6,12 @@
 # ⚠️ 路径基准是本文件所在目录（deploy/compose/），不是仓库根——搬家后所有相对路径
 #    都重算过：`../../services/rag` 是后端源码，`../rabbitmq.conf` 是 deploy/ 下的配置。
 #
+# ⚠️ 本文件不含任何宿主端口映射——这是**生产基线**。开发用的端口映射在
+#    deploy/docker-compose.override.yml，由 compose 的默认发现自动叠加。
+#    方向不能反过来：compose 的 ports 是**追加**语义，base 有端口时覆盖层删不掉
+#    （实测：base 5433 + override 127.0.0.1:5433 会同时存在，数据库照样对外）。
+#    倒过来写则默认安全——忘记加 prod 覆盖层最坏只是本地连不上，不会把库暴露到公网。
+#
 # ⚠️ 四个数据卷全部显式写 `name:` 固定原名。compose 项目名默认取目录名，
 #    改名即等于换一组新空卷——原有数据会「看起来消失」。这是本次迁移唯一
 #    可能丢数据的地方，卷名里的 rag_coder_ 前缀是化石，不要「顺手改整齐」。
@@ -19,9 +25,6 @@ services:
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
     volumes:
       - neo4jdata:/data
-    ports:
-      - "7474:7474"   # Browser
-      - "7687:7687"   # Bolt
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
       interval: 5s
@@ -37,8 +40,6 @@ services:
       REPOS_DIR: /data/repos
     volumes:
       - ../../services/rag/data/repos:/data/repos   # 任务级临时工作区（M16 后源码主存储是 MinIO bundle，此挂载仅为残留清扫与跨容器共享，非持久层）
-    ports:
-      - "9200:8000"   # 宿主 9200（本机 8000/8001 已被其他服务占用）
     depends_on:
       db:
         condition: service_healthy
@@ -57,8 +58,6 @@ services:
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
       - ../rabbitmq.conf:/etc/rabbitmq/conf.d/30-rag.conf:ro
-    ports:
-      - "5673:5672"   # 宿主 5672 常被别的项目占用，这里错开
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -73,9 +72,6 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ragminio123}
     volumes:
       - miniodata:/data
-    ports:
-      - "9100:9000"   # S3 API
-      - "9101:9001"   # 控制台
 
   worker:
     build: ../../services/rag

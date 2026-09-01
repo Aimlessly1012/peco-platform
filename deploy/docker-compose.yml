@@ -11,13 +11,21 @@
 # 那是把第一个房客的名字刻在楼上，后续项目会全住在错误的命名空间里。
 # 数据卷的原名由各文件里的卷级 `name:` 保证（见 rag.yml 的说明）。
 #
+# 本文件是**生产基线**：不含任何宿主端口映射，不含 restart 策略。
+#
 # 用法：
-#   docker compose -f deploy/docker-compose.yml up -d
+#   开发   cd deploy && docker compose up -d
+#          （默认发现会自动叠加 docker-compose.override.yml，那里才有端口映射）
+#   生产   docker compose -f deploy/docker-compose.yml \
+#                        -f deploy/docker-compose.prod.yml \
+#                        -f deploy/docker-compose.server.yml up -d
+#          （显式 -f 时 compose **不会**自动加载 override，实测确认——
+#            所以生产路径天然拿不到开发端口）
 name: peco
 
 include:
   - compose/rag.yml
-  # - compose/platform.yml   # 3.4 交付后启用（平台服务并入同栈）
+  - compose/platform.yml
 
 services:
   db:
@@ -28,8 +36,6 @@ services:
       POSTGRES_DB: ragcoder
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U raguser -d ragcoder"]
       interval: 5s
