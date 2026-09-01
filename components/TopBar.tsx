@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signIn, signOut, useSession } from "next-auth/react";
+import { PROJECTS } from "@/lib/projects";
 
 /** 终端风顶栏：导航 + 当前用户。与 RAG 前端同一套令牌与结构。 */
 
@@ -13,11 +14,23 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
+/**
+ * 导航由两截拼成：平台壳条目（首页）写死，项目条目来自注册表。
+ *
+ * 首页不是项目——它是壳，`active` 判据也特殊（`p === "/"`，不能按前缀匹配，
+ * 否则任何路径都会命中）。项目条目的 active 统一由 route 推导。
+ *
+ * `access` 管进入不管可见性：approved 项目对所有登录用户可见，点进去由
+ * middleware 送到 /pending；只有 admin 项目对非管理员隐藏。
+ */
 const NAV: NavItem[] = [
   { href: "/", label: "首页", active: (p) => p === "/" },
-  { href: "/front", label: "组件库", active: (p) => p.startsWith("/front") },
-  { href: "/rag", label: "RAG Coder", active: (p) => p.startsWith("/rag") },
-  { href: "/admin", label: "审核", active: (p) => p.startsWith("/admin"), adminOnly: true },
+  ...PROJECTS.map((project) => ({
+    href: project.route,
+    label: project.label,
+    active: (p: string) => p === project.route || p.startsWith(`${project.route}/`),
+    adminOnly: project.access === "admin",
+  })),
 ];
 
 export default function TopBar() {

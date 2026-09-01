@@ -1,0 +1,77 @@
+name: CI（平台）
+
+# 与 ci.yml（services/rag 的 Python 测试）并列而不是合并成一个 workflow：
+# GitHub 的 paths 过滤是 **workflow 级**不是 job 级，写在一起就只有两种结果——
+# 要么平台改动触发不了（ci.yml 的 paths 只有 services/rag/**），
+# 要么两边的活在每次改动上都跑一遍。分成两个文件，各自的 paths 各自负责。
+#
+# 这也顺带兑现了 platform-project-slots 的结构约定：新增项目 = 新增文件。
+# 第三个项目进来时是加第三个 workflow，不是编辑这两个中的任何一个。
+# paths 两处逐字重复——**GitHub Actions 不支持 YAML anchor/alias**，
+# 写 `&x` / `*x` 不会报错，只会静默解析不到，等于过滤失效。改这里记得改两处。
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "app/**"
+      - "components/**"
+      - "lib/**"
+      - "scripts/**"
+      - "middleware.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "eslint.config.mjs"
+      - "tailwind.config.ts"
+      - "next.config.ts"
+      - ".github/workflows/ci-platform.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - "components/**"
+      - "lib/**"
+      - "scripts/**"
+      - "middleware.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "eslint.config.mjs"
+      - "tailwind.config.ts"
+      - "next.config.ts"
+      - ".github/workflows/ci-platform.yml"
+  workflow_dispatch:
+
+concurrency:
+  # 与 rag 的 ci 分组，否则两个 workflow 会互相 cancel-in-progress
+  group: ci-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint / 守卫 / 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # 与 Dockerfile 的 node:20-alpine 对齐
+          cache: npm
+
+      - name: 装依赖
+        run: npm ci
+
+      - name: lint
+        run: npm run lint
+
+      # 两个守卫都是秒级的，放在 build 前面——它们失败时的信息比构建报错精确得多
+      - name: 守卫 · middleware matcher 覆盖注册表
+        run: npm run check:middleware
+
+      # 这条同时验「产物是否最新」：改了 curation.ts 却忘了重跑 gen:reference 会在这里被拦下。
+      # R1 记的「无 CI 时这条约定没有强制」，到此闭合。
+      - name: 守卫 · 字段说明产物与人写条目
+        run: npm run check:reference
+
+      - name: 构建
+        run: npm run build

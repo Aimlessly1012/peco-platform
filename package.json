@@ -9,6 +9,7 @@
     "lint": "eslint",
     "gen:reference": "node scripts/gen-heitu-reference.mjs",
     "check:reference": "node scripts/gen-heitu-reference.mjs --check",
+    "check:middleware": "node scripts/check-middleware.mjs",
     "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {

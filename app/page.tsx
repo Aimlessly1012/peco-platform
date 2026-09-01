@@ -1,59 +1,21 @@
 import Link from "next/link";
+import { PROJECTS } from "@/lib/projects";
 
 /**
  * 作品集首页（M12 P5）——整个站的门面。
  * 公开可访问：访客不用登录就能看作品，登录只是为了进受保护的 RAG Coder。
+ *
+ * 展示哪些项目由 `lib/projects.ts` 决定，不在这里另立一份清单——两份清单迟早会分叉。
+ * 带 `showcase` 的才进作品集：`/admin` 审核台是内部工具不是作品，它不写 showcase。
  */
 
-interface Work {
-  slug: string;
-  href: string;
-  name: string;
-  tagline: string;
-  body: string;
-  stack: string[];
-  highlights: string[];
-  status: string;
-  /** 需要登录+审核才能进 */
-  gated?: boolean;
-  external?: string;
-}
-
-const WORKS: Work[] = [
-  {
-    slug: "rag-coder",
-    href: "/rag",
-    name: "RAG Coder",
-    tagline: "代码库检索增强问答",
-    body:
-      "把一个陌生仓库变成能问答的知识库：克隆、解析分块、生成摘要、向量化、写入图谱，" +
-      "最后产出需求功能导图、业务流程图与模块数据流图。聊天带出处，答案里的每个引用都能点回代码。",
-    stack: ["Next.js", "FastAPI", "LangGraph", "Neo4j", "pgvector", "MCP"],
-    highlights: [
-      "六阶段索引管道，进度经 SSE 实时推送",
-      "报告四件套：功能导图 / 页面结构 / 业务流程 / 时序图",
-      "7 个 MCP 工具，可直接接进 Claude Code",
-    ],
-    status: "在线运行",
-    gated: true,
-  },
-  {
-    slug: "heitu",
-    href: "/front",
-    name: "heitu 组件库",
-    tagline: "React 工具库 · hooks / 表单渲染 / canvas 图表",
-    body:
-      "自研的 React 工具库，已发布到 npm。JSON 配置驱动的表单渲染器支持联动、异步数据源与自定义控件；" +
-      "图表基于 canvas 自绘，不依赖重型图表库。",
-    stack: ["React", "TypeScript", "antd", "Canvas", "father"],
-    highlights: [
-      "FormRender：配置即表单，支持 watch 联动与 service 异步选项",
-      "charts：折线 / 柱状 / 饼图 / 柱线混合，canvas 自绘",
-      "hooks 与 canvas engine 独立入口，按需引入",
-    ],
-    status: "npm 已发布",
-  },
-];
+/** 进作品集的项目：注册表里带 showcase 的那些，顺序即注册表顺序。 */
+const WORKS = PROJECTS.filter((p) => p.showcase).map((p) => ({
+  ...p.showcase!,
+  href: p.route,
+  /** 需登录+审核才能进——由访问级别推导，不再各自标记 */
+  gated: p.access !== "public",
+}));
 
 export default function HomePage() {
   return (
