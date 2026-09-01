@@ -88,7 +88,7 @@ function AnswerBody({
         );
       },
     }),
-    [onCite]
+    [onCite],
   );
 
   return (
@@ -105,7 +105,11 @@ function splitSymbol(symbol: string): { name: string; kind: string | null } {
   return m ? { name: m[1], kind: m[2] } : { name: s, kind: null };
 }
 
-export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
+export default function ChatPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id: projectId } = use(params);
   const [project, setProject] = useState<Project | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -136,7 +140,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const citeRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
-    api<Project>(`/projects/${projectId}`).then(setProject).catch(() => {});
+    api<Project>(`/projects/${projectId}`)
+      .then(setProject)
+      .catch(() => {});
     api<ChatSession[]>(`/projects/${projectId}/sessions`).then((list) => {
       setSessions(list);
       if (list.length > 0) {
@@ -174,8 +180,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           role: m.role,
           content: m.content,
           citations: m.citations_json || [],
-        }))
-      )
+        })),
+      ),
     );
     setSelected(null);
   }, [activeSession]);
@@ -228,35 +234,37 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
    */
   const runAsk = useCallback(
     async (sessionId: string, question: string, index: number) => {
-    const patchLast = (
-      patch: Partial<DisplayMessage> | ((m: DisplayMessage) => Partial<DisplayMessage>)
-    ) =>
-      setMessages((prev) =>
-        prev.map((m, i) => {
-          if (i !== index) return m;
-          const p = typeof patch === "function" ? patch(m) : patch;
-          return { ...m, ...p };
-        })
-      );
+      const patchLast = (
+        patch:
+          | Partial<DisplayMessage>
+          | ((m: DisplayMessage) => Partial<DisplayMessage>),
+      ) =>
+        setMessages((prev) =>
+          prev.map((m, i) => {
+            if (i !== index) return m;
+            const p = typeof patch === "function" ? patch(m) : patch;
+            return { ...m, ...p };
+          }),
+        );
 
-    await askStream(sessionId, question, {
-      onToken: (t) => patchLast((m) => ({ content: m.content + t })),
-      onCitations: (c) => patchLast({ citations: c }),
-      // 心跳只在首 token 之前有意义，标一次就够
-      onPing: () => patchLast((m) => (m.pinged ? {} : { pinged: true })),
-      onStage: (stage) => patchLast({ stage }),
-      onDone: () => {
-        patchLast({ streaming: false });
-        setBusy(false);
-      },
-      onError: (message) => {
-        setError(message);
-        patchLast({ streaming: false, failed: message });
-        setBusy(false);
-      },
-    });
+      await askStream(sessionId, question, {
+        onToken: (t) => patchLast((m) => ({ content: m.content + t })),
+        onCitations: (c) => patchLast({ citations: c }),
+        // 心跳只在首 token 之前有意义，标一次就够
+        onPing: () => patchLast((m) => (m.pinged ? {} : { pinged: true })),
+        onStage: (stage) => patchLast({ stage }),
+        onDone: () => {
+          patchLast({ streaming: false });
+          setBusy(false);
+        },
+        onError: (message) => {
+          setError(message);
+          patchLast({ streaming: false, failed: message });
+          setBusy(false);
+        },
+      });
     },
-    []
+    [],
   );
 
   const send = async () => {
@@ -313,26 +321,28 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 stage: undefined,
                 startedAt: Date.now(),
               }
-            : m
-        )
+            : m,
+        ),
       );
       await runAsk(activeSession, question, index);
     },
-    [busy, activeSession, messages, runAsk]
+    [busy, activeSession, messages, runAsk],
   );
 
   /** 右栏显示：选中的回答，否则最后一条带引用的回答 */
   const sourceIndex = useMemo(() => {
-    if (selected !== null && messages[selected]?.role === "assistant") return selected;
+    if (selected !== null && messages[selected]?.role === "assistant")
+      return selected;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant" && messages[i].citations.length > 0) return i;
+      if (messages[i].role === "assistant" && messages[i].citations.length > 0)
+        return i;
     }
     return null;
   }, [selected, messages]);
 
   const citations = useMemo(
     () => (sourceIndex !== null ? messages[sourceIndex].citations : []),
-    [sourceIndex, messages]
+    [sourceIndex, messages],
   );
 
   /** 点上标：先把右栏切到该消息，等对应条目渲染出来再滚动高亮。 */
@@ -419,7 +429,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   </button>
                 )}
               </div>
-            )
+            ),
           )}
         </div>
         <div className="text-[10px] leading-relaxed text-faint">
@@ -473,7 +483,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   <span className="block h-4 w-4 bg-accent" />
                   <span className="text-[10px] tracking-label text-dim">
                     ANSWER
-                    {m.citations.length > 0 ? ` · 命中 ${m.citations.length} 个代码块` : ""}
+                    {m.citations.length > 0
+                      ? ` · 命中 ${m.citations.length} 个代码块`
+                      : ""}
                   </span>
                 </div>
                 {/* 首 token 之前走等待态；一有内容立刻切流式渲染 */}
@@ -491,7 +503,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     }`}
                   >
                     <div className="prose prose-sm max-w-none prose-p:my-0 prose-p:mb-3 prose-p:last:mb-0 prose-code:bg-accent/[.08] prose-code:px-1 prose-code:py-px prose-code:text-accent prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-none prose-pre:border prose-pre:border-line prose-pre:bg-shade prose-pre:text-ink2">
-                      <AnswerBody content={m.content} onCite={(n) => handleCite(i, n)} />
+                      <AnswerBody
+                        content={m.content}
+                        onCite={(n) => handleCite(i, n)}
+                      />
                     </div>
                     {m.streaming && m.content && (
                       <span className="ml-0.5 inline-block h-[13px] w-[7px] animate-pulse bg-accent align-text-bottom" />
@@ -513,7 +528,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   </div>
                 )}
               </div>
-            )
+            ),
           )}
           <div ref={bottomRef} />
         </div>
@@ -561,7 +576,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           <span className="text-[10px] tracking-label text-dim">
             SOURCES · {citations.length}
           </span>
-          <span className="ml-auto text-[10px] tracking-wide text-faint">SORT BY SCORE</span>
+          <span className="ml-auto text-[10px] tracking-wide text-faint">
+            SORT BY SCORE
+          </span>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
           {citations.length === 0 && (
@@ -596,7 +613,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     {i + 1}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] font-medium" title={c.file_path}>
+                    <div
+                      className="truncate text-[12px] font-medium"
+                      title={c.file_path}
+                    >
                       {basename(c.file_path)}
                       <span className="font-normal text-dim">
                         :{c.start_line}-{c.end_line}

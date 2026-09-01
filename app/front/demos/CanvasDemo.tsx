@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Space } from "antd";
 import { Animate, Circle, Custom, Group, Line, Rect, Stage, Text } from "heitu";
+import FieldTables from "../reference/FieldTables";
 
 /**
  * canvas 引擎 demo：Stage + 六种图元 + 命中检测 + 补间动画。
@@ -292,6 +293,9 @@ export default function CanvasDemo({ section }: { section: string }) {
       <div className="border border-line bg-shade px-3 py-2 text-[11px] leading-relaxed text-ink2">
         {infoText}
       </div>
+
+      {/* 上面这些图元的构造参数，在这里逐个解释 */}
+      <FieldTables tab="canvas" />
     </div>
   );
 }

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "gen:reference": "node scripts/gen-heitu-reference.mjs",
+    "check:reference": "node scripts/gen-heitu-reference.mjs --check",
     "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {

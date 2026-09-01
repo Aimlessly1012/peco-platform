@@ -13,12 +13,60 @@ import {
   usePrevious,
   useWindowSize,
 } from "heitu";
-import { HOOK_COUNT, HOOK_GROUPS, type HookEntry } from "./hooks-reference";
+import type { FieldRow } from "../reference/types";
+import { REFERENCE } from "../reference/generated";
 
 /**
  * hooks demo：每组挑一到两个做可交互演示，其余在速查表里列全。
  * 19 个逐一做 demo 只会变成噪音，这里按「看得见效果」的优先。
+ *
+ * 签名与说明来自 `reference/generated.ts`（`npm run gen:reference` 从 .d.ts 提取 + 人写覆盖）。
+ * 原先的 `hooks-reference.ts` 是 165 行手抄，自称「与当前安装版本一致」却无人守护——
+ * 实测已经腐烂：它写的 `createContainer(useHook) => { …, withProvider }` 在 1.1.1 里
+ * 实际是 `withContainer`，还漏了 `Context`。现在这类漂移会在生成期报错，不会悄悄上线。
  */
+
+const HOOK_TABLES = REFERENCE.find((entry) => entry.tab === "hooks")?.tables ?? [];
+const HOOK_COUNT = HOOK_TABLES.reduce((n, table) => n + table.rows.length, 0);
+
+/**
+ * 侧栏 section ↔ 生成物里的表标题，外加本组的一行导语。
+ *
+ * 留在页面这一侧而不进 curation.ts：分组怎么起名、导语怎么写，是橱窗的展示决定，
+ * 与 heitu 的类型声明无关。标题是两边的连接点，改 curation 的表标题这里要跟着改——
+ * 对不上时下面会显式提示，不会静默变成一张空表。
+ */
+const SECTIONS = [
+  { key: "async", title: "数据请求", hint: "异步状态机、可取消请求、轮询与 axios 实例" },
+  { key: "dom", title: "DOM 观察", hint: "尺寸、可见性与设备像素比，SSR 安全" },
+  { key: "storage", title: "存储", hint: "三种持久化介质，同一套读写签名" },
+  { key: "interaction", title: "交互", hint: "倒计时、无限滚动、长连接与图片预载" },
+  { key: "util", title: "工具", hint: "上一次的值、深比较依赖、窗口尺寸与状态容器" },
+] as const;
+
+/** 本页有可交互演示的 hook——页面自己的事实，heitu 的类型里没有这个信息。 */
+const DEMO_HOOKS = new Set([
+  "useAsyncFn",
+  "usePolling",
+  "useElementSize",
+  "useInView",
+  "useDevicePixelRatio",
+  "useLocalStorage",
+  "useCountDown",
+  "usePrevious",
+  "useWindowSize",
+]);
+
+const tableOf = (title: string) => HOOK_TABLES.find((table) => table.title === title);
+
+/** 生成物里缺这张表时给出可排查的提示，而不是让页面空一块。 */
+function MissingTable({ title }: { title: string }) {
+  return (
+    <p className="border border-danger/40 bg-danger/[.06] px-3 py-2 text-[11px] text-danger">
+      生成物里没有「{title}」这张表——检查 curation.ts 的清单标题，然后重跑 npm run gen:reference。
+    </p>
+  );
+}
 
 function Panel({
   title,
@@ -234,16 +282,17 @@ function WindowPanel() {
 export default function HooksDemo({ section }: { section: string }) {
   // 本组件由 /front 以 dynamic(ssr:false) 加载，整棵子树都不参与 SSR，
   // 所以 storage / window 这类 hook 不需要额外的 mounted 门禁
-  const group = HOOK_GROUPS.find((g) => g.key === section);
+  const group = SECTIONS.find((s) => s.key === section);
 
   if (section === "all" || !group) {
     return <ApiTable />;
   }
+  const table = tableOf(group.title);
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[11px] leading-relaxed text-muted">
-        {group.hint} · 本组共 {group.items.length} 个，其中带 DEMO 标记的在下面可以直接操作。
+        {group.hint} · 本组共 {table?.rows.length ?? 0} 个，其中带 DEMO 标记的在下面可以直接操作。
       </p>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -264,21 +313,25 @@ export default function HooksDemo({ section }: { section: string }) {
         )}
       </div>
 
-      <section className="border border-line bg-panel">
-        <div className="flex items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
-          <span className="block h-2 w-2 bg-accent" />
-          <span className="text-[10px] tracking-label text-dim">
-            {group.label.toUpperCase()} · {group.items.length} 个 API
-          </span>
-        </div>
-        <HookRows items={group.items} />
-      </section>
+      {table ? (
+        <section className="border border-line bg-panel">
+          <div className="flex items-center gap-2.5 border-b border-line bg-shade px-4 py-2.5">
+            <span className="block h-2 w-2 bg-accent" />
+            <span className="text-[10px] tracking-label text-dim">
+              {group.title} · {table.rows.length} 个 API
+            </span>
+          </div>
+          <HookRows items={table.rows} />
+        </section>
+      ) : (
+        <MissingTable title={group.title} />
+      )}
     </div>
   );
 }
 
 /** 一组 hook 的签名表格（组内视图与「全部 API」共用）。 */
-function HookRows({ items }: { items: HookEntry[] }) {
+function HookRows({ items }: { items: readonly FieldRow[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-[12px]">
@@ -294,18 +347,17 @@ function HookRows({ items }: { items: HookEntry[] }) {
             <tr key={h.name} className="border-b border-hair align-top last:border-b-0">
               <td className="whitespace-nowrap px-4 py-3">
                 <code className="text-[11.5px] text-ink">{h.name}</code>
-                {h.demo && (
+                {DEMO_HOOKS.has(h.name) && (
                   <span className="ml-1.5 border border-accent/40 px-1 py-px text-[9px] tracking-wide text-accent">
                     DEMO
                   </span>
                 )}
               </td>
               <td className="px-4 py-3">
-                <code className="break-all text-[10.5px] leading-relaxed text-ink2">
-                  {h.signature}
-                </code>
+                <code className="break-all text-[10.5px] leading-relaxed text-ink2">{h.type}</code>
               </td>
-              <td className="px-4 py-3 leading-relaxed text-muted">{h.desc}</td>
+              {/* 保留换行：源 TSDoc 里有多行带 `-` 列表的条目 */}
+              <td className="whitespace-pre-line px-4 py-3 leading-relaxed text-muted">{h.desc}</td>
             </tr>
           ))}
         </tbody>
@@ -332,37 +384,48 @@ function ApiTable() {
               </tr>
             </thead>
             <tbody>
-              {HOOK_GROUPS.map((g) => (
-                // 匿名 <> 不接受 key，必须写成 <Fragment key=...>
-                <Fragment key={g.key}>
-                  <tr className="border-b border-hair bg-shade/60">
-                    <td colSpan={3} className="px-4 py-2">
-                      <span className="text-[10px] tracking-label text-dim">
-                        {g.label.toUpperCase()}
-                      </span>
-                      <span className="ml-2 text-[10px] text-faint">{g.hint}</span>
-                    </td>
-                  </tr>
-                  {g.items.map((h) => (
-                    <tr key={h.name} className="border-b border-hair align-top last:border-b-0">
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <code className="text-[11.5px] text-ink">{h.name}</code>
-                        {h.demo && (
-                          <span className="ml-1.5 border border-accent/40 px-1 py-px text-[9px] tracking-wide text-accent">
-                            DEMO
-                          </span>
-                        )}
+              {SECTIONS.map((s) => {
+                const table = tableOf(s.title);
+                return (
+                  // 匿名 <> 不接受 key，必须写成 <Fragment key=...>
+                  <Fragment key={s.key}>
+                    <tr className="border-b border-hair bg-shade/60">
+                      <td colSpan={3} className="px-4 py-2">
+                        <span className="text-[10px] tracking-label text-dim">{s.title}</span>
+                        <span className="ml-2 text-[10px] text-faint">{s.hint}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <code className="break-all text-[10.5px] leading-relaxed text-ink2">
-                          {h.signature}
-                        </code>
-                      </td>
-                      <td className="px-4 py-3 leading-relaxed text-muted">{h.desc}</td>
                     </tr>
-                  ))}
-                </Fragment>
-              ))}
+                    {table ? (
+                      table.rows.map((h) => (
+                        <tr key={h.name} className="border-b border-hair align-top last:border-b-0">
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <code className="text-[11.5px] text-ink">{h.name}</code>
+                            {DEMO_HOOKS.has(h.name) && (
+                              <span className="ml-1.5 border border-accent/40 px-1 py-px text-[9px] tracking-wide text-accent">
+                                DEMO
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <code className="break-all text-[10.5px] leading-relaxed text-ink2">
+                              {h.type}
+                            </code>
+                          </td>
+                          <td className="whitespace-pre-line px-4 py-3 leading-relaxed text-muted">
+                            {h.desc}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="border-b border-hair last:border-b-0">
+                        <td colSpan={3} className="px-4 py-3">
+                          <MissingTable title={s.title} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

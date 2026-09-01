@@ -7,6 +7,7 @@ import {
   LineChartComponent,
   PieChartComponent,
 } from "heitu";
+import FieldTables from "../reference/FieldTables";
 
 /**
  * charts demo：canvas 自绘，不依赖重型图表库。
@@ -160,6 +161,9 @@ export default function ChartsDemo({ section }: { section: string }) {
       <div className="border border-line bg-shade px-3 py-2 text-[11px] leading-relaxed text-ink2">
         {pickedText ? `选中：${pickedText}` : "尚未选中任何图元"}
       </div>
+
+      {/* 清单（5.1）到位前，FieldTables 查不到 charts 的数据会整块不渲染 */}
+      <FieldTables tab="charts" />
     </div>
   );
 }

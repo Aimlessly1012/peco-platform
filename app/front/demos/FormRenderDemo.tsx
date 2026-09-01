@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Button, Form, Space } from "antd";
 import { FormRender } from "heitu";
 import type { IConfigItem } from "heitu";
+import FieldTables from "../reference/FieldTables";
 
 /**
  * FormRender demo：配置即表单。
@@ -236,6 +237,9 @@ export default function FormRenderDemo({ section }: { section: string }) {
           </pre>
         </div>
       </div>
+
+      {/* 上面 CONFIG 面板里出现的键，在这里逐个解释 */}
+      <FieldTables tab="form" />
     </div>
   );
 }
