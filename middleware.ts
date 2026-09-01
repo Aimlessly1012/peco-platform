@@ -20,10 +20,14 @@ export default withAuth(
     const { pathname } = req.nextUrl;
     const project = projectOf(pathname);
 
-    // matcher 只挂受保护项目，理论上必然命中；命中不到说明 matcher 与注册表脱节，
-    // 那属于配置错误而不是访问控制问题——放行交给页面与 API 的第二道校验，
-    // 真正的拦截由 check:middleware 在 CI 上完成。
-    if (!project || project.access === "public") {
+    // 只有**明确登记为 public** 的项目才放行。
+    //
+    // 注册表里查不到时走下面的检查而不是放行：路径能到这儿说明它在 matcher 里，
+    // 有人把它写进 matcher 就是想保护它，登记遗漏应当多挡一层而不是敞开。
+    // 改造前 matcher 命中的一切都要过 status 检查，这里保持同样的下限——
+    // check:middleware 对「matcher 有、注册表无」只给提示不报错（那可能是
+    // 开发中的项目），所以运行时不能指望守卫拦下它。
+    if (project?.access === "public") {
       return NextResponse.next();
     }
 
@@ -32,7 +36,7 @@ export default withAuth(
       return NextResponse.redirect(new URL("/pending", req.url));
     }
     // admin 级项目追加管理员校验
-    if (project.access === "admin" && token?.role !== "admin") {
+    if (project?.access === "admin" && token?.role !== "admin") {
       return NextResponse.redirect(new URL("/", req.url));
     }
     return NextResponse.next();
