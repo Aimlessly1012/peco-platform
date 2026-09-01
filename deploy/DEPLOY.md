@@ -1,5 +1,29 @@
 # 生产部署（Nginx 子路径 /rag）
 
+> ## ⚠️ 本文描述的是 M7 时代的部署方式，正文已过时
+>
+> 三处与现状不符，看正文前先知道：
+>
+> 1. **仓库变了**：RAG Coder 已并入 peco-platform 的 `services/rag/`，
+>    不再是独立仓库。正文里 `git clone ... RAG_coder` 那一步不成立。
+> 2. **Nginx 变了**：现在是容器化 Nginx（`deploy/docker-compose.server.yml`
+>    挂载 `deploy/nginx/nginx-server.conf`），用 compose 服务名访问上游。
+>    正文说的「把 `nginx-rag.conf` include 进宿主已有 server 块」是 M7 的做法，
+>    该文件已退役归档到 `deploy/server-notes/`。
+> 3. **前端变了**：`127.0.0.1:3300` 那个独立前端已于 M12 阶段二下线
+>    （commit `8e0c946`），`/rag/*` 现在由平台自身提供。
+>
+> **现行部署方式**：
+>
+> ```bash
+> docker compose -f deploy/docker-compose.yml \
+>                -f deploy/docker-compose.prod.yml \
+>                -f deploy/docker-compose.server.yml up -d --build
+> ```
+>
+> 正文保留未重写——它记录的运维细节（SSE 三件套为什么不能删、证书续期
+> 钩子、各服务的内存账）仍然有效，重写的收益低于误删这些的风险。
+
 面向：服务器上已经跑着别的 Docker Compose 项目，RAG Coder 挂在同一域名的 `/rag` 子路径下共存。
 
 端口占用：本项目只在回环上绑 `127.0.0.1:8001`（后端）与 `127.0.0.1:3300`（前端），
