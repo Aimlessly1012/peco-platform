@@ -30,7 +30,7 @@ def _isolate_settings() -> None:
     绑到了各自的命名空间，重新赋值只会换掉本模块这一个引用。
 
     为什么要有这一层：pydantic-settings 的 env_file 是相对 **CWD** 解析的。
-    在 backend/ 下跑没事（那儿没有 .env），但在仓库根跑就会加载根 .env——里面是
+    在 services/rag/ 下跑没事（那儿没有 .env），但在仓库根跑就会加载根 .env——里面是
     真的 API key，测试一旦漏打就是真金白银 + 真实模型的不确定输出。
     """
     clean = Settings(_env_file=None)

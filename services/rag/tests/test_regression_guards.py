@@ -13,8 +13,10 @@ import pytest
 from app.core.config import settings
 from tests import conftest as ct
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-REPO_ROOT = BACKEND_DIR.parent
+SERVICE_DIR = Path(__file__).resolve().parent.parent          # services/rag
+# 再上两级才是仓库根。M16 并入 peco-platform 后这里从一级改成两级——写错不会报错，
+# 只会让下面几条 .env 隔离测试走进 pytest.skip，门禁静默失效。
+REPO_ROOT = SERVICE_DIR.parent.parent
 TESTS_DIR = Path(__file__).resolve().parent
 
 
@@ -75,7 +77,7 @@ def test_pytest_from_repo_root_is_safe():
 
     result = subprocess.run(
         [sys.executable, "-m", "pytest",
-         "backend/tests/test_regression_guards.py::test_settings_use_dummy_credentials",
+         "services/rag/tests/test_regression_guards.py::test_settings_use_dummy_credentials",
          "-q", "--no-cov", "-p", "no:cacheprovider"],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=90,
     )
@@ -232,7 +234,7 @@ def test_a_hanging_test_is_actually_interrupted(tmp_path):
     result = subprocess.run(
         [sys.executable, "-m", "pytest", str(probe), "-p", "no:cacheprovider",
          "--timeout=1", "--no-cov", "-q"],
-        cwd=BACKEND_DIR, capture_output=True, text=True, timeout=90,
+        cwd=SERVICE_DIR, capture_output=True, text=True, timeout=90,
     )
 
     assert result.returncode != 0
@@ -252,7 +254,7 @@ def test_integration_tests_skip_when_neo4j_is_unreachable():
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_pipeline_integration.py",
          "-m", "integration", "-q", "--no-cov", "-p", "no:cacheprovider", "-rs"],
-        cwd=BACKEND_DIR, capture_output=True, text=True, timeout=120, env=env,
+        cwd=SERVICE_DIR, capture_output=True, text=True, timeout=120, env=env,
     )
 
     assert result.returncode == 0, "依赖不可达应当 skip 而不是失败\n" + result.stdout[-1500:]

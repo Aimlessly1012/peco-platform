@@ -108,7 +108,7 @@ async def main() -> int:
         report = format_report(results, args.top_k, title=title)
         report += (
             f"\n\n摘要来源: {'真实 LLM' if args.real_summary else '模板（未调用 LLM）'}\n"
-            f"语料: backend/tests/fixtures/mini_repo\n"
+            f"语料: services/rag/tests/fixtures/mini_repo\n"
         )
 
         print(f"[3/3] 完成\n", file=sys.stderr)
