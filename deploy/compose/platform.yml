@@ -1,0 +1,30 @@
+# 平台（Next 前端 + 平台自有 API）。
+#
+# 由仓库根的 docker-compose.yml 迁入（M16 3.4）。原来平台是独立一栈，靠
+# `networks: rag_coder_default: external: true` 挂到 RAG 那套 compose 的网络上，
+# 启动前提是「RAG 的 compose 已经起着」——两栈之间只有网络这一条脆弱的纽带，
+# 顺序错了就起不来，而且 compose 层面表达不了「平台依赖 db」。
+#
+# 并入同一个 project 后：网络由伞文件的默认网络提供（不再声明 external），
+# 依赖关系可以直接写 depends_on。
+#
+# 相对路径基准是本文件所在目录（deploy/compose/），与 rag.yml 一致——
+# compose 的 include 默认以被包含文件自身的目录解析相对路径。
+services:
+  platform:
+    # 构建上下文是仓库根：Dockerfile 与 .dockerignore 都在那里。
+    # .dockerignore 已排除 services/ deploy/ openspec/，否则 `COPY . .`
+    # 会把 Python 后端（含 338M 的 .venv）拷进 Next 镜像。
+    build: ../..
+    env_file: ../../.env.production
+    environment:
+      NODE_ENV: production
+    ports:
+      # 只绑回环，公网流量一律经 nginx——与并入前的策略一致，不因换栈而放开
+      - "127.0.0.1:3200:3000"
+    depends_on:
+      # 并入同栈才表达得了：平台要写 platform_users，db 没起来时启动没有意义。
+      # db 定义在伞文件里（平台与 RAG 共用），那里有 healthcheck。
+      db:
+        condition: service_healthy
+    restart: unless-stopped

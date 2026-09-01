@@ -1,5 +1,23 @@
+# 平台（Next）镜像的构建上下文。Dockerfile 是 `COPY . .`，所以这里漏掉什么，
+# 什么就会进镜像。
+#
+# m16 把 RAG 后端 subtree 并进本仓后，仓库根不再只有前端：services/ 是 Python 服务，
+# 其中 .venv 一个目录就 338M——不排除的话全部进 Next 镜像，而 Next 一个字节也用不到。
 node_modules
 .next
 .git
 .env.local
 npm-debug.log
+
+# RAG 后端：Python 服务、测试固件、虚拟环境，与 Next 构建无关
+services
+
+# 编排与部署配置：由 compose 挂载或在宿主机使用，不进应用镜像
+deploy
+
+# 规格文档：给人和 openspec CLI 读的，不参与构建
+openspec
+
+# 平台自己的杂物
+.claude
+CLAUDE.md

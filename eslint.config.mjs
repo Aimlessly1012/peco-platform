@@ -26,6 +26,10 @@ const eslintConfig = defineConfig([
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // RAG 后端（m16 subtree 并入）：Python 服务，连同它的 umi 测试固件与
+    // .venv 里 338M 第三方 JS。平台的 lint / tsc 都不该看这里——
+    // git 有 services/rag/.gitignore 挡着，但 eslint 与 tsc 不读 .gitignore。
+    "services/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
