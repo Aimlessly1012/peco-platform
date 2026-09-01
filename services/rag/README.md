@@ -34,7 +34,7 @@ docker compose up -d --build
 docker compose up -d db neo4j
 ```
 
-后端（`backend/` 目录）：
+后端（本目录 `services/rag/`）：
 
 ```bash
 uv sync && uv run alembic upgrade head && uv run uvicorn app.main:app --port 8001 --reload
@@ -118,16 +118,16 @@ claude mcp add --transport http rag-coder http://localhost:9200/mcp --header "Au
 
 ## 测试（M17：CI 门禁 + 覆盖率基线）
 
-单测档（无外部服务；含覆盖率门槛 `--cov-fail-under` 与用例超时，配置见 `backend/pyproject.toml`）：
+单测档（无外部服务；含覆盖率门槛 `--cov-fail-under` 与用例超时，配置见 `pyproject.toml`）：
 
 ```bash
-cd backend && uv run pytest -m "not integration"
+uv run pytest -m "not integration"
 ```
 
 集成测试需要 Neo4j（`docker compose up -d neo4j`）；只跑集成档要加 `--no-cov`（单跑必然跌破覆盖率门槛，那不是真信号）：
 
 ```bash
-cd backend && uv run pytest -m integration --no-cov
+uv run pytest -m integration --no-cov
 ```
 
 CI（`.github/workflows/ci.yml`）：unit job 跟每次 push/PR；integration job 在 main push 时自带 Neo4j + MinIO 跑集成档（含离线检索评测档）。
@@ -135,11 +135,11 @@ CI（`.github/workflows/ci.yml`）：unit job 跟每次 push/PR；integration jo
 检索质量评测（M17 双层基线，详见 `docs/retrieval-baseline.md`）：
 
 ```bash
-cd backend && uv run pytest tests/test_retrieval_eval.py -m eval --no-cov   # 离线确定性档（行为漂移守卫）
-cd backend && uv run python scripts/eval_retrieval.py                        # 真实模型档（手动，产生 API 费用）
+uv run pytest tests/test_retrieval_eval.py -m eval --no-cov               # 离线确定性档（行为漂移守卫）
+uv run python scripts/eval_retrieval.py                                  # 真实模型档（手动，产生 API 费用）
 ```
 
-注意：跑测试请在 `backend/` 目录下执行；conftest 有护栏保证从任何目录跑都不会加载真实 `.env`，但习惯上仍以 `backend/` 为准。
+注意：跑测试请在 `services/rag/` 目录下执行；conftest 有护栏保证从任何目录跑都不会加载真实 `.env`，但习惯上仍以本目录为准。
 
 ## OpenSpec 工作流
 
