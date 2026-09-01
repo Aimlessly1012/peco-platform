@@ -15,6 +15,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro
+      # 各项目的 location 片段，由主配置 include。挂在 conf.d/ 之外是必须的——
+      # conf.d/*.conf 会被 nginx 当顶层配置加载到 http 块，而它们是 location。
+      - ./nginx/projects:/etc/nginx/projects:ro
       # HTTPS（baotao.wang）：证书与 ACME webroot 都在宿主机，certbot 续期后
       # 由 renewal-hooks/deploy 里的脚本 reload 本容器
       - /etc/letsencrypt:/etc/letsencrypt:ro
