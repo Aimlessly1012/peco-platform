@@ -2,10 +2,19 @@ name: CI
 
 # 单测档跟每次 push 与 PR；集成档要起 Neo4j/MinIO 两个服务容器，
 # 只在 main 的 push 上跑（PR 上跑会把每次改动的等待时间拉到分钟级）
+# 并入 peco-platform 后加 paths 过滤：这个 workflow 只测 services/rag，
+# 平台侧（app/、components/）的改动不该拖着 Python 测试跑一遍。
+# 把 workflow 自身也列进去，否则改了 CI 配置反而不会触发它自检。
 on:
   push:
     branches: ["**"]
+    paths:
+      - "services/rag/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "services/rag/**"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:   # 允许在任意分支手动触发（含集成档），合并前想跑漂移守卫用这个
 
 concurrency:
@@ -21,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: services/rag
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +38,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          cache-dependency-glob: services/rag/uv.lock
 
       - name: 装依赖
         run: uv sync --group dev
@@ -49,7 +58,7 @@ jobs:
           RERANK_API_KEY=ci-fake-rerank-key-do-not-use
           EOF
 
-      # 覆盖率门槛与超时都写在 backend/pyproject.toml 的 addopts 里，
+      # 覆盖率门槛与超时都写在 services/rag/pyproject.toml 的 addopts 里，
       # 这里不重复配置，避免两处漂移
       - name: 跑单测档
         run: uv run pytest -m "not integration"
@@ -59,7 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
-          path: backend/.coverage
+          path: services/rag/.coverage
           if-no-files-found: ignore
 
   integration:
@@ -68,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: services/rag
     services:
       neo4j:
         image: neo4j:5.26-community
@@ -92,7 +101,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          cache-dependency-glob: services/rag/uv.lock
 
       - name: 装依赖
         run: uv sync --group dev
