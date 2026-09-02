@@ -23,7 +23,7 @@
 - [x] 3.2 `_index_fixture` 从 test_pipeline_integration 提升为可复用建图 helper（空 Neo4j 一键建图）
 - [x] 3.3 实现指标 harness：直调 `search_layered`，计算 hit@k / recall@k / MRR，输出按 query 明细+汇总，报告头部含配置指纹（top_k、rerank 开关等）
 - [x] 3.4 离线确定性档：fake 向量 + rerank 关闭，生成并提交基线快照（按 question_type 分文件，钉 node_id 序列不钉分数）；快照比对用例进 CI；提供显式重建快照命令
-- [ ] 3.5 真实模型评测脚本 `backend/scripts/eval_retrieval.py`（真 embedding + 可选 rerank，手动触发），跑通一次并把首个质量基线数（含日期/模型/配置指纹）记入 `docs/`
+- [x] 3.5 真实模型评测脚本 `backend/scripts/eval_retrieval.py`（真 embedding + 可选 rerank，手动触发），跑通一次并把首个质量基线数（含日期/模型/配置指纹）记入 `docs/`
 
 ## 4. 存储硬化与故障演练
 
@@ -43,4 +43,4 @@
 
 - [x] 6.1 主观验收：CI 两 job 绿灯截图/链接；故意漂移一次检索顺序确认离线档红灯
 - [x] 6.2 核对四份 spec delta 场景逐条有对应用例或脚本产出
-- [ ] 6.3 真实档基线数已入 docs 且含配置指纹；`openspec status` 全勾后归档
+- [x] 6.3 真实档基线数已入 docs 且含配置指纹；`openspec status` 全勾后归档

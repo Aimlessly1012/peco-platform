@@ -1,7 +1,7 @@
 # 检索质量基线（M17）
 
-评测分两档，跑的是同一份 golden 集（`backend/tests/eval/golden_set.json`，23 条，
-local 11 / global 6 / impact 6），语料是 `backend/tests/fixtures/mini_repo`。
+评测分两档，跑的是同一份 golden 集（`services/rag/tests/eval/golden_set.json`，23 条，
+local 11 / global 6 / impact 6），语料是 `services/rag/tests/fixtures/mini_repo`。
 
 | 档 | 向量 | rerank | 跑法 | 判定 |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ WITH node, score LIMIT $top_k                                  -- 截断排在�
 ### 跑法
 
 ```bash
-cd backend
+cd services/rag
 uv run pytest tests/test_retrieval_eval.py -m eval --no-cov -q      # 比对基线（库不干净会 skip）
 ```
 
@@ -78,29 +78,32 @@ docker rm -f m17-eval-neo4j
 
 空 Neo4j 上 fixture 会自动建图，无手工准备步骤。重建后的快照 diff 要随 PR 评审。
 
-快照按 question_type 分文件：`backend/tests/eval/snapshots/{local,global,impact}.json`。
+快照按 question_type 分文件：`services/rag/tests/eval/snapshots/{local,global,impact}.json`。
 
 ## 真实模型档：质量基线
 
-> **状态：待首次运行。** 脚本已就绪（`backend/scripts/eval_retrieval.py`），
-> 按 M17 约束需经维护者确认后手动跑（产生 embedding / rerank API 费用）。
-> 跑完把下表补上，并把完整报告贴在本节下方。
+> **状态：首个基线已建立（2026-09-02）。** 后续每次跑完在下表追加一行；配置指纹与上一行
+> 不同（换嵌入模型 / 维度 / rerank 开关 / top_k）就另起一行并注明「不可比」，不要覆盖旧行。
 
 ```bash
-cd backend
-uv run python scripts/eval_retrieval.py --out ../docs/retrieval-baseline-run.md
+cd services/rag
+uv run python scripts/eval_retrieval.py --out docs/retrieval-baseline-run.md
 ```
+
+⚠️ `--out` 是整文件覆盖写入，**绝不要指向本文档**；出到 `retrieval-baseline-run.md` 再把数值手工填进下表。
+脚本读的是仓库根 `.env`（真实 key），`EMBEDDING_BASE_URL` 只到 `/v1`，不要带 `/embeddings` 后缀（客户端自己拼，带了会 404）。
 
 | 日期 | embedding 模型 | rerank | top_k | hit@k | recall@k | MRR | 备注 |
 |---|---|---|---|---|---|---|---|
-| _待填_ | | | | | | | 首个基线 |
+| 2026-09-02 | Qwen/Qwen3-VL-Embedding-8B（1024 维，SiliconFlow） | Qwen/Qwen3-Reranker-8B 开启，候选 ×3 | 8 | 1.0000 | 0.9022 | 0.8783 | **首个基线**，模板摘要。分组 recall/MRR：local 0.9545/0.8515、global 0.7639/0.8889、impact 0.9444/0.9167 |
 
 配置指纹（脚本报告头部会打印，形如）：
 
 ```
-retrieval_top_k=8 rerank_enabled=False rerank_model= rerank_candidate_multiplier=3
-embedding_model=text-embedding-v3 embedding_dim=1024
+embedding_dim=1024 embedding_model=Qwen/Qwen3-VL-Embedding-8B rerank_candidate_multiplier=3
+rerank_enabled=True rerank_model=Qwen/Qwen3-Reranker-8B retrieval_top_k=8 eval_top_k=8
 ```
+（以上即首个基线的指纹。）
 
 指纹里任一项变化都会让数值不可比——对比历史基线前先核对指纹。
 
@@ -118,3 +121,50 @@ node_id 含起始行号，改几行代码标注就失效，而文件粒度足以
 `expect_symbols` 只是人工备注，不参与指标计算。
 
 改评测集就是改这一个 JSON 文件，diff 可读，走代码评审。
+
+## 附：真实模型档首跑完整报告（2026-09-02）
+
+### 首跑完整报告 · 2026-09-02 10:47
+
+config: embedding_dim=1024 embedding_model=Qwen/Qwen3-VL-Embedding-8B rerank_candidate_multiplier=3 rerank_enabled=True rerank_model=Qwen/Qwen3-Reranker-8B retrieval_top_k=8 eval_top_k=8
+queries: 23
+
+## 明细
+
+| id         | type    | hit | recall | mrr  | 首个命中位次 | 命中目标 |
+|---|---|---|---|---|---|---|
+| local-01   | local   | ✓ | 1.00 | 1.00 | 1 | file:backend/routers/orders.py |
+| local-02   | local   | ✓ | 1.00 | 1.00 | 1 | file:backend/routers/orders.py |
+| local-03   | local   | ✓ | 0.50 | 1.00 | 1 | file:backend/routers/orders.py |
+| local-04   | local   | ✓ | 1.00 | 0.17 | 6 | file:backend/services/order_service.py |
+| local-05   | local   | ✓ | 1.00 | 1.00 | 1 | file:backend/models.py |
+| local-06   | local   | ✓ | 1.00 | 1.00 | 1 | file:backend/routers/users.py |
+| local-07   | local   | ✓ | 1.00 | 1.00 | 1 | file:backend/main.py |
+| local-08   | local   | ✓ | 1.00 | 1.00 | 1 | file:frontend/lib/api.ts |
+| local-09   | local   | ✓ | 1.00 | 1.00 | 1 | file:frontend/pages/orders.tsx |
+| local-10   | local   | ✓ | 1.00 | 1.00 | 1 | file:frontend/components/OrderCard.tsx |
+| local-11   | local   | ✓ | 1.00 | 0.20 | 5 | file:backend/main.py |
+| global-01  | global  | ✓ | 0.50 | 0.33 | 3 | module:orders, module:users |
+| global-02  | global  | ✓ | 1.00 | 1.00 | 1 | module:orders, file:backend/services/order_service.py, file:backend/routers/orders.py |
+| global-03  | global  | ✓ | 1.00 | 1.00 | 1 | module:users, file:backend/routers/users.py |
+| global-04  | global  | ✓ | 0.67 | 1.00 | 1 | file:frontend/lib/api.ts, file:backend/main.py |
+| global-05  | global  | ✓ | 0.75 | 1.00 | 1 | file:frontend/pages/orders.tsx, file:backend/routers/orders.py, file:backend/services/order_service.py |
+| global-06  | global  | ✓ | 0.67 | 1.00 | 1 | file:backend/routers/orders.py, file:backend/main.py, module:users, module:orders |
+| impact-01  | impact  | ✓ | 0.67 | 1.00 | 1 | file:backend/routers/orders.py, file:backend/main.py |
+| impact-02  | impact  | ✓ | 1.00 | 1.00 | 1 | file:backend/routers/orders.py, file:frontend/pages/orders.tsx |
+| impact-03  | impact  | ✓ | 1.00 | 0.50 | 2 | file:backend/routers/orders.py, file:backend/services/order_service.py |
+| impact-04  | impact  | ✓ | 1.00 | 1.00 | 1 | file:frontend/pages/index.tsx, file:frontend/pages/orders.tsx, file:frontend/lib/api.ts |
+| impact-05  | impact  | ✓ | 1.00 | 1.00 | 1 | file:backend/models.py, file:backend/services/order_service.py, file:backend/routers/orders.py |
+| impact-06  | impact  | ✓ | 1.00 | 1.00 | 1 | file:frontend/pages/orders.tsx, file:frontend/components/OrderCard.tsx |
+
+## 汇总
+
+| 分组 | 条数 | hit@k | recall@k | MRR |
+|---|---|---|---|---|
+| overall | 23 | 1.0000 | 0.9022 | 0.8783 |
+| local | 11 | 1.0000 | 0.9545 | 0.8515 |
+| global | 6 | 1.0000 | 0.7639 | 0.8889 |
+| impact | 6 | 1.0000 | 0.9444 | 0.9167 |
+
+摘要来源: 模板（未调用 LLM）
+语料: backend/tests/fixtures/mini_repo
