@@ -43,6 +43,9 @@
 - [ ] 5.5 旧部署目录保留一周观察期，期间旧仓库只读
 - [ ] 5.6 nginx 一致性确认（切换窗口内，轻量）：`nginx -T` 比对服务器生效配置与 `deploy/nginx-server.conf` 一致。预检时「线上或仍跑旧前端」的判断**有误已更正**：`8e0c946`（8-22）已把 `/rag` 归平台并附公网复测；`nginx-rag.conf` 是 M7 时代无消费者的死文件（见 migration-baseline §5.2）
 - [ ] 5.7 MinIO 链路功能验证：切换后触发一次小型索引，确认 `rag-artifacts` 有对象落桶——基线时桶为空（0 对象），**空桶不作为「数据没丢」的证据**
+- [ ] 5.8 服务器轮换 `SECRET_KEY`（泄露处置，2026-09-02）：改服务器 `services/rag/.env` → 重建 backend/worker → 有 git token 的私有项目重填 token。旧值曾随 `09e0c70` 上过公开仓库的 m16 分支，历史已改写（→`06e6905`）但 GitHub 孤儿 commit 仍可按 SHA 访问，**轮换才是止血**。本地已于 9-02 轮换完成
+- [ ] 5.9 worker 日志 grep `AuthenticationError`：线上大概率仍用失效的旧 DeepSeek key（本地 9-02 已换 `deepseek-v4-pro`，旧 key 探测 401），同窗口换 key 并重建 worker
+- [ ] 5.10 核查服务器 RabbitMQ / MinIO 是否仍是 compose 的 `:-` 默认口令（见 `deploy/compose/rag.yml`），是则换掉——MinIO 口令同时是存储层凭据，改后 `.env` 与 compose 两处要一致
 
 ## 6. 收口
 
