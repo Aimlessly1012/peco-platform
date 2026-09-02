@@ -26,6 +26,6 @@
 
 ## 5. 收口
 
-- [ ] 5.1 `npm run lint`、`npm run build`、`check:middleware`、`check:reference` 全绿
-- [ ] 5.2 手工验收：三个现有项目导航/首页入口正常（前端已完成 ✓，含未登录 curl 逐条：/rag 裸路径 307、/front 200、/admin 307）；**pending 用户与非 admin 已登录态的行为验证需真实账号**——前端已给静态等价论证（status 检查代码逐字未变、admin 判定等价），但论证不是验证，留给用户在切换窗口用真实账号跑一遍
-- [ ] 5.3 `openspec validate --strict` 通过
+- [x] 5.1 `npm run lint`、`npm run build`、`check:middleware`、`check:reference` 全绿
+- [x] 5.2 手工验收全部完成：导航/首页入口 ✓；**真实登录态**的访问级别验证——把用户自己的行临时翻成 pending → `/rag` 落 `/pending`（顶栏仍可见 RAG Coder 入口，access≠可见性成立）；翻成 member/approved → `/admin` 弹回首页、审核入口消失、`/rag` 可进；验后恢复 admin。不需要第二个 GitHub 账号：jwt 回调每次刷新回库取状态，改库即改会话
+- [x] 5.3 `openspec validate --strict` 通过
