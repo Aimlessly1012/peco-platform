@@ -28,8 +28,9 @@
 
 ## 4. 本地全栈验证
 
-- [ ] 4.1 `docker compose up -d` 起全栈，`docker volume ls` 与基线比对：**零新增 rag 相关卷**；`platform_users` 行数与 Neo4j 节点数与 1.1 一致
-- [ ] 4.2 端到端冒烟：登录 → `/rag` 项目列表 → 详情 → chat 一轮 SSE 流式问答（引用联动正常）；MCP 端点可达
+- [x] 4.1a（4.1 实施中追加）nginx 平台上游写死了旧容器名 `peco-platform-platform-1`——统一栈里容器名为 `peco-platform-1`、服务名 `platform`，切换后首页会 502。已改为服务名（`39374a1`）。本地 E2E 用 nginx 挂 3000 的覆盖层（scratchpad）复刻 server.yml 的挂载结构，使 OAuth 回调、同源 `/rag/api`、SSE 走真实 `projects/rag.conf` 三者同时成立
+- [x] 4.1 `docker compose up -d` 起全栈，`docker volume ls` 与基线比对：**零新增 rag 相关卷**；`platform_users` 行数与 Neo4j 节点数与 1.1 一致
+- [x] 4.2 端到端冒烟（用户真人登录态走完）：GitHub OAuth 回调 302 → 审核台/项目列表/三个项目详情/报告/模块 全部 200；`/rag/api/*` 经 nginx 20 次 200 / 0 次 401（JWS 跨服务验签成立）；触发一次全量索引 → worker 经 RabbitMQ 接单跑完、MinIO 落 3 个对象（5.7 提前达成）；chat `/ask` 经 nginx 200 / 9.5KB，后端调 LLM 4×200，回答落库；会话删除 5×204 顺带回归。发现并修：DeepSeek key 失效（老 .env 原样搬来，线上疑同）、ADMIN_GITHUB_ID 数字占位、nginx 平台上游旧容器名
 - [x] 4.3 `services/rag` 下 pytest 全绿；`npm run lint`、`npm run build`、`npm run check:reference` 全绿
 - [x] 4.4 openspec 在新仓库可用：`openspec list` 见 m17-test-baseline ✓。校验标准修正为**与迁移前一致**：`--all --strict` 下 6 个随迁 spec 失败（缺 `## Purpose` 段），对照冻结旧仓库同样 6 个——搬家前既有，非搬家所致；本仓库自有 change 全部 strict 通过。修复 6 个 spec 另立 change
 

@@ -17,7 +17,7 @@
 ## 3. nginx 槽位化
 
 - [x] 3.1 `deploy/nginx/nginx.conf` 拆出 `include projects/*.conf`；`projects/rag.conf` 承载现有 `/rag/api` 剥前缀规则，行为逐字节等价
-- [ ] 3.2 本地全栈起后验证：`/rag` 全链路（含 SSE）与拆分前一致
+- [x] 3.2 本地全栈（nginx 挂 3000、`projects/rag.conf` 由独立目录 include）真流量验证：用户登录态下 chat 回答**逐字流出**、`[n]` 引用可跳右栏代码；`/ask` 经 nginx 200 / 9.5KB。conf.d 拆分后的 SSE 六件套在真实流量下成立，与拆分前行为一致
 
 ## 4. 接入清单与文档
 
