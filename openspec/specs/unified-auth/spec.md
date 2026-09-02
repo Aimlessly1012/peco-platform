@@ -1,6 +1,9 @@
 # 统一鉴权
 
-GitHub 登录 + JWS 共享验签 + 审核准入（M12 D2）。
+## Purpose
+全平台唯一登录体系：GitHub OAuth 在平台侧签发 JWS（HS256）会话 cookie，RAG 后端以共享密钥直接验签；审核准入的最新状态每次刷新回库读取（M12 D2）。
+
+## Requirements
 
 ### Requirement: GitHub 登录与审核准入
 平台 SHALL 以 GitHub OAuth 作为唯一登录方式（NextAuth）。首次登录 SHALL 建立

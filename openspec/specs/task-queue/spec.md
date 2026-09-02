@@ -1,6 +1,9 @@
 # 任务队列
 
-索引任务的入队、执行、重试、重启恢复与并发控制（M13：Celery + RabbitMQ）。
+## Purpose
+索引任务的入队、执行、重试、重启恢复与并发控制。M13 起由 Celery + RabbitMQ 承担，worker 跑在独立容器，进度经数据库跨进程共享并以 SSE 推送到前端。
+
+## Requirements
 
 ### Requirement: 任务出进程执行
 索引任务 SHALL 由独立 Celery worker 容器执行（broker 为 RabbitMQ），API 进程仅投递任务并立即返回；触发索引的 API 契约（请求/响应/状态码）SHALL 与进程内时代保持不变。

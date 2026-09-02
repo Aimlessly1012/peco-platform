@@ -1,6 +1,9 @@
 # 生产部署
 
+## Purpose
 子路径 /rag 形态的生产部署约束（M7 起，M12 后由 peco-platform 承担页面、nginx 统一入口，API 前缀语义不变）。
+
+## Requirements
 
 ### Requirement: 子路径部署形态
 系统 SHALL 支持以 Nginx 子路径（约定 `/rag`）方式与既有项目共存于同一服务器：前端经 Next.js `basePath`（构建期 env `NEXT_PUBLIC_BASE_PATH`）适配、前端 API 地址支持相对路径（`NEXT_PUBLIC_API_BASE=/rag/api`）、后端经 uvicorn `--root-path`（env `ROOT_PATH`）适配文档地址。所有路径 env 默认为空，空值行为 SHALL 与本机开发形态完全一致。

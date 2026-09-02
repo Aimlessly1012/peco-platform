@@ -1,6 +1,9 @@
 # RAG 侧账号与访问控制
 
+## Purpose
 RAG 后端的访问守卫、会话归属与管理员用户管理。登录与准入自 M12 起由 unified-auth（平台 GitHub 登录）承担；M8 的邀请码/密码体系已废弃，未收录（历史见 archive）。
+
+## Requirements
 
 ### Requirement: 全站访问守卫
 除 `/auth/login`、`/auth/register`、`/health`、`/mcp`（保持既有独立 Bearer token 鉴权）外，业务 API SHALL 要求有效登录态，未登录返回 401「请先登录」。`DELETE /projects/{id}` SHALL 仅 admin 可用。前端 SHALL 在未登录时跳转 /login，member 界面不显示删除入口。

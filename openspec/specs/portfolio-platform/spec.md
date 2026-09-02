@@ -1,6 +1,9 @@
 # 作品集平台
 
-peco-platform：统一入口、作品集首页与组件库展示（M12）。
+## Purpose
+peco-platform 作为多项目平台的统一入口：作品集首页、GitHub 登录与审核准入的宿主，以及 RAG Coder 与 heitu 组件库两个项目的展示壳（M12 起建，M16 起与 RAG 后端同仓）。
+
+## Requirements
 
 ### Requirement: 平台路由与首页
 系统 SHALL 提供一个 Next.js 单体前端占据站点根路径，含：作品集首页（`/`）、登录页
@@ -18,8 +21,8 @@ peco-platform：统一入口、作品集首页与组件库展示（M12）。
   其视觉与站点其余部分同源（无 antd 默认风格割裂）
 
 ### Requirement: RAG Coder 页面迁入
-RAG Coder 的全部前端页面（项目列表、项目详情三页签、聊天、MCP 接入说明、用户管理）
-SHALL 迁入平台的 `/rag/*` 路由，交互与功能保持与迁移前一致；RAG 独立前端容器 SHALL 下线。
+RAG Coder 的全部前端页面 SHALL 迁入平台的 `/rag/*` 路由（项目列表、项目详情三页签、
+聊天、MCP 接入说明、用户管理），交互与功能保持与迁移前一致；RAG 独立前端容器 SHALL 下线。
 页面 SHALL 通过 `/rag/api/*` 访问后端，SSE 流式（聊天、索引进度）与引用联动行为不变。
 
 #### Scenario: 迁移后功能无回归
