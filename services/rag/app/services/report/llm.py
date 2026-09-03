@@ -13,6 +13,7 @@ import logging
 from openai import APIError, AsyncOpenAI, RateLimitError
 
 from app.core.config import settings
+from app.core.loop_local import LoopLocal
 
 logger = logging.getLogger(__name__)
 
@@ -143,21 +144,31 @@ SEQ_PROMPT = """你是资深软件架构师。基于以下功能模块的静态�
 
 
 class ReportLLM:
+    # 同 Summarizer：Semaphore 与 httpx 连接池按事件循环持有（见 core/loop_local.py）
     def __init__(self) -> None:
-        self._client: AsyncOpenAI | None = None
-        self._semaphore = asyncio.Semaphore(settings.summary_concurrency)
+        self._client_local: LoopLocal[AsyncOpenAI] = LoopLocal(
+            lambda: self._make_client()
+        )
+        self._semaphore_local: LoopLocal[asyncio.Semaphore] = LoopLocal(
+            lambda: asyncio.Semaphore(settings.summary_concurrency)
+        )
+
+    def _make_client(self) -> AsyncOpenAI:
+        if not settings.chat_api_key:
+            raise RuntimeError("未配置 CHAT_API_KEY，无法生成理解报告")
+        return AsyncOpenAI(
+            base_url=settings.chat_base_url,
+            api_key=settings.chat_api_key,
+            timeout=settings.llm_timeout_seconds,  # M4 D7
+        )
 
     @property
     def client(self) -> AsyncOpenAI:
-        if not settings.chat_api_key:
-            raise RuntimeError("未配置 CHAT_API_KEY，无法生成理解报告")
-        if self._client is None:
-            self._client = AsyncOpenAI(
-                base_url=settings.chat_base_url,
-                api_key=settings.chat_api_key,
-                timeout=settings.llm_timeout_seconds,  # M4 D7
-            )
-        return self._client
+        return self._client_local.get()
+
+    @property
+    def _semaphore(self) -> asyncio.Semaphore:
+        return self._semaphore_local.get()
 
     @property
     def model(self) -> str:

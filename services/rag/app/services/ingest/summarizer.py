@@ -10,6 +10,7 @@ import re
 from openai import APIError, AsyncOpenAI, RateLimitError
 
 from app.core.config import settings
+from app.core.loop_local import LoopLocal
 from app.services.ingest.chunker import CodeChunk
 from app.services.ingest.router_parser import ModuleMap
 
@@ -208,21 +209,32 @@ def module_agg_hash(file_hashes: list[str]) -> str:
 
 
 class Summarizer:
+    # 模块级单例会被 Celery 的每任务新循环复用，而 Semaphore 与 httpx 连接池都绑死
+    # 首次使用时的循环——用 LoopLocal 让它们跟着循环走（见 core/loop_local.py）
     def __init__(self) -> None:
-        self._client: AsyncOpenAI | None = None
-        self._semaphore = asyncio.Semaphore(settings.summary_concurrency)
+        self._client_local: LoopLocal[AsyncOpenAI] = LoopLocal(
+            lambda: self._make_client()
+        )
+        self._semaphore_local: LoopLocal[asyncio.Semaphore] = LoopLocal(
+            lambda: asyncio.Semaphore(settings.summary_concurrency)
+        )
+
+    def _make_client(self) -> AsyncOpenAI:
+        if not settings.chat_api_key:
+            raise RuntimeError("未配置 CHAT_API_KEY，无法调用摘要服务")
+        return AsyncOpenAI(
+            base_url=settings.chat_base_url,
+            api_key=settings.chat_api_key,
+            timeout=settings.llm_timeout_seconds,  # M4 D7：超时进入既有退避降级
+        )
 
     @property
     def client(self) -> AsyncOpenAI:
-        if self._client is None:
-            if not settings.chat_api_key:
-                raise RuntimeError("未配置 CHAT_API_KEY，无法调用摘要服务")
-            self._client = AsyncOpenAI(
-                base_url=settings.chat_base_url,
-                api_key=settings.chat_api_key,
-                timeout=settings.llm_timeout_seconds,  # M4 D7：超时进入既有退避降级
-            )
-        return self._client
+        return self._client_local.get()
+
+    @property
+    def _semaphore(self) -> asyncio.Semaphore:
+        return self._semaphore_local.get()
 
     @property
     def model(self) -> str:

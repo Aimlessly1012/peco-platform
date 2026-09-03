@@ -5,27 +5,39 @@ import logging
 from openai import APIError, AsyncOpenAI, BadRequestError, RateLimitError
 
 from app.core.config import settings
+from app.core.loop_local import LoopLocal
 
 logger = logging.getLogger(__name__)
 
 
 class Embedder:
+    # 同 Summarizer：Semaphore 与 httpx 连接池按事件循环持有，否则 Celery 第二个
+    # 任务换了循环就炸（见 core/loop_local.py）
     def __init__(self) -> None:
-        self._client: AsyncOpenAI | None = None
-        self._semaphore = asyncio.Semaphore(settings.embedding_concurrency)
+        self._client_local: LoopLocal[AsyncOpenAI] = LoopLocal(
+            lambda: self._make_client()
+        )
+        self._semaphore_local: LoopLocal[asyncio.Semaphore] = LoopLocal(
+            lambda: asyncio.Semaphore(settings.embedding_concurrency)
+        )
+
+    def _make_client(self) -> AsyncOpenAI:
+        # 惰性初始化：导入时不要求 api_key（测试 mock / 未配置时启动不崩）
+        if not settings.embedding_api_key:
+            raise RuntimeError("未配置 EMBEDDING_API_KEY，无法调用嵌入服务")
+        return AsyncOpenAI(
+            base_url=settings.embedding_base_url,
+            api_key=settings.embedding_api_key,
+            timeout=settings.embedding_timeout_seconds,  # M4 D7：超时进入既有退避
+        )
 
     @property
     def client(self) -> AsyncOpenAI:
-        # 惰性初始化：导入时不要求 api_key（测试 mock / 未配置时启动不崩）
-        if self._client is None:
-            if not settings.embedding_api_key:
-                raise RuntimeError("未配置 EMBEDDING_API_KEY，无法调用嵌入服务")
-            self._client = AsyncOpenAI(
-                base_url=settings.embedding_base_url,
-                api_key=settings.embedding_api_key,
-                timeout=settings.embedding_timeout_seconds,  # M4 D7：超时进入既有退避
-            )
-        return self._client
+        return self._client_local.get()
+
+    @property
+    def _semaphore(self) -> asyncio.Semaphore:
+        return self._semaphore_local.get()
 
     async def _embed_once(self, texts: list[str]) -> list[list[float]]:
         async with self._semaphore:
