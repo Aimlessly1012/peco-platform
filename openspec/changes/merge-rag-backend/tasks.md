@@ -36,16 +36,16 @@
 
 ## 5. 服务器切换（需用户在场的窗口，每步有回退点）
 
-- [ ] 5.1 服务器落盘同款数据基线（卷列表 + 行数/节点数）
-- [ ] 5.2 拉取新仓库；`docker compose config` 渲染检查卷名（up 之前，纸面上就能看出错）
-- [ ] 5.3 down 旧栈 → 从 `deploy/` up 新栈 → 比对基线 → nginx 生效
-- [ ] 5.4 线上冒烟：`/`、`/login`（OAuth 回调）、`/rag` 全链路、MCP 端点
-- [ ] 5.5 旧部署目录保留一周观察期，期间旧仓库只读
-- [ ] 5.6 nginx 一致性确认（切换窗口内，轻量）：`nginx -T` 比对服务器生效配置与 `deploy/nginx-server.conf` 一致。预检时「线上或仍跑旧前端」的判断**有误已更正**：`8e0c946`（8-22）已把 `/rag` 归平台并附公网复测；`nginx-rag.conf` 是 M7 时代无消费者的死文件（见 migration-baseline §5.2）
+- [x] 5.1 服务器落盘同款数据基线（卷列表 + 行数/节点数） **✅ 2026-09-03 采集**（ubuntu@43.167.170.20，旧栈 rag_coder 7 容器 + peco-platform 1 容器运行中）：卷恰四个 `rag_coder_*`（宿主共 5 卷；pgdata 63.4M / neo4jdata 1.5G / miniodata 2.6M / rabbitmqdata 268K）；PG `platform_users=3 users=8 projects=2 chat_sessions=6 chat_messages=29 index_jobs=9 understanding_reports=2 alembic=0010`；Neo4j 节点 4383 / 关系 7036；MinIO 8 个对象（repo-bundles / index-snapshots / reports）；公网 `/` 200、`/rag` 307→login、`/rag/api/health` 200、`/front` 200
+- [x] 5.2 拉取新仓库；`docker compose config` 渲染检查卷名（up 之前，纸面上就能看出错） **✅ 2026-09-03**：`git clone main`（`ac00c53`）到 `~/peco`；`services/rag/.env` 与 `.env.production` 逐字节复制自旧目录，`deploy/.env` 软链；`docker compose config --format json` 24 项判定全过（项目名 peco、卷名恰四个 `rag_coder_*`、宿主端口仅 nginx 80/443 + 两个回环、restart 全 unless-stopped、AUTH_JWT_SECRET==NEXTAUTH_SECRET、MinIO/RabbitMQ 口令插值生效且非默认、nginx 四个挂载源存在、构建上下文正确）；三镜像后台预构建成功（`peco-backend`/`peco-worker` 1.81GB、`peco-platform` 337MB，日志零错误），旧栈全程在线
+- [x] 5.3 down 旧栈 → 从 `deploy/` up 新栈 → 比对基线 → nginx 生效 **✅ 2026-09-03 05:17Z 执行**（脚本 `server-switch.sh`，全程 77s）：两旧栈 `compose down` 不带 `-v` → 四卷原地 → `~/peco` `up -d` → backend/platform 就绪用时 67s（公网中断约 1 分钟）。基线比对**全中**：四个 `rag_coder_*` 卷、PG 八项逐项相等（alembic 0010 未动）、Neo4j 4383/7036、MinIO 8 对象。宿主卷总数 6 而非基线 5：多出的是 Neo4j 镜像 `VOLUME /logs` 生成的匿名卷（新容器 `peco-neo4j-1` 一个；旧容器留下的 `7310d6c8…` 成孤儿，随 6.4 一起清），**四个数据卷零新增零改名**。nginx 起来即生效（`nginx -t` 通过）
+- [x] 5.4 线上冒烟：`/`、`/login`（OAuth 回调）、`/rag` 全链路、MCP 端点 **✅ 2026-09-03**：`/` 200、`/login` 200、`/rag` 307→`/login?callbackUrl=%2Frag`、`/rag/api/health` 200、`/rag/api/projects` 401、`/rag/api/mcp` 401（未带 token）、`/front` 200、`http://` 与旧域 `heitu.wang` 均 301 → `https://baotao.wang`。OAuth 回调与登录态链路由用户真人账号验证（见 5.7 备注）
+- [ ] 5.5 旧部署目录保留一周观察期，期间旧仓库只读（**观察期 2026-09-03 → 2026-09-10**；旧目录 `~/RAG_coder`、`~/peco-platform` 与旧镜像 `rag_coder-*`、`peco-platform-platform` 均保留，回退脚本 `server-rollback.sh` 可一键还原）
+- [x] 5.6 nginx 一致性确认（切换窗口内，轻量）：`nginx -T` 比对服务器生效配置与 `deploy/nginx-server.conf` 一致。预检时「线上或仍跑旧前端」的判断**有误已更正**：`8e0c946`（8-22）已把 `/rag` 归平台并附公网复测；`nginx-rag.conf` 是 M7 时代无消费者的死文件（见 migration-baseline §5.2） **✅ 2026-09-03**：`nginx -T` 显示 `conf.d/default.conf` + `projects/rag.conf` 两个文件生效，上游 `platform:3000` / `backend:8000`，`include /etc/nginx/projects/*.conf` 在位；容器内两份配置与仓库 `deploy/nginx/` 逐字节一致。宿主级唯一依赖 certbot 续期钩子已改为 `docker exec peco-nginx-1 nginx -s reload`
 - [ ] 5.7 MinIO 链路功能验证：切换后触发一次小型索引，确认 `rag-artifacts` 有对象落桶——基线时桶为空（0 对象），**空桶不作为「数据没丢」的证据**
-- [ ] 5.8 服务器轮换 `SECRET_KEY`（泄露处置，2026-09-02）：改服务器 `services/rag/.env` → 重建 backend/worker → 有 git token 的私有项目重填 token。旧值曾随 `09e0c70` 上过公开仓库的 m16 分支，历史已改写（→`06e6905`）但 GitHub 孤儿 commit 仍可按 SHA 访问，**轮换才是止血**。本地已于 9-02 轮换完成
-- [ ] 5.9 worker 日志 grep `AuthenticationError`：线上大概率仍用失效的旧 DeepSeek key（本地 9-02 已换 `deepseek-v4-pro`，旧 key 探测 401），同窗口换 key 并重建 worker
-- [ ] 5.10 核查服务器 RabbitMQ / MinIO 是否仍是 compose 的 `:-` 默认口令（见 `deploy/compose/rag.yml`），是则换掉——MinIO 口令同时是存储层凭据，改后 `.env` 与 compose 两处要一致
+- [x] 5.8 服务器轮换 `SECRET_KEY`（泄露处置，2026-09-02）：改服务器 `services/rag/.env` → 重建 backend/worker → 有 git token 的私有项目重填 token。旧值曾随 `09e0c70` 上过公开仓库的 m16 分支，历史已改写（→`06e6905`）但 GitHub 孤儿 commit 仍可按 SHA 访问，**轮换才是止血**。本地已于 9-02 轮换完成 **✅ 核实：无需轮换**——服务器 `SECRET_KEY` 的 sha256 前缀 `3618475b63` ≠ 泄露值 `99fbe4755e`（泄露的是本地那份，线上从未用过），且 `projects.git_token_encrypted` 非空行数 = 0。服务器 `.env` 原样进新栈
+- [x] 5.9 worker 日志 grep `AuthenticationError`：线上大概率仍用失效的旧 DeepSeek key（本地 9-02 已换 `deepseek-v4-pro`，旧 key 探测 401），同窗口换 key 并重建 worker **✅ 核实：无需换 key**——线上聊天/摘要走硅基流动（`CHAT_BASE_URL=api.siliconflow.cn`，`CHAT_MODEL=Qwen3-Coder-30B`，`SUMMARY_MODEL=DeepSeek-V4-Flash` 经硅基流动），worker 近 3000 行日志 `AuthenticationError` = 0。失效的 DeepSeek 直连 key 只在本地用过
+- [x] 5.10 核查服务器 RabbitMQ / MinIO 是否仍是 compose 的 `:-` 默认口令（见 `deploy/compose/rag.yml`），是则换掉——MinIO 口令同时是存储层凭据，改后 `.env` 与 compose 两处要一致 **✅ 核实：已非默认**——`RABBITMQ_PASSWORD` 与 `MINIO_SECRET_KEY` 均为 32 位随机串（≠ compose `:-` 默认值），渲染检查再次确认插值进 rabbitmq / minio 服务
 
 ## 6. 收口
 
