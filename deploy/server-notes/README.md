@@ -88,6 +88,10 @@ location / {
   服务器是腾讯云**东京**（ap-tokyo），境外机器，无需 ICP 备案，无公网 IPv6（勿加 AAAA）。
 - 旧域 `heitu.wang`（腾讯 DNSPod）整站 301 → baotao.wang；其证书 2026-11 到期，
   若域名不续注册，到期后把 nginx 里 heitu 的 443 块和 80 server_name 里的两个名字删掉即可。
+  **2026-09-03 已退役**：用户决定不再使用 heitu.wang。nginx 里 heitu 的 443 块与 80 server_name 的两个名字已删
+  （先改 nginx 再 `certbot delete --cert-name heitu.wang`，顺序反了 nginx 会因证书路径缺失起不来），
+  DNSPod 的两条 A 记录由用户删除，域名到期不续。此后 https://heitu.wang 若仍解析到本机，会命中 443 的
+  首个 server 块并因证书不匹配被浏览器拦下——这是预期，不是故障。
 - 入口统一收敛到 `https://baotao.wang`：80 只留 ACME 验证路径，其余（http、www、
   旧域、IP 直访）一律 301。MCP 接入地址：`https://baotao.wang/rag/api/mcp`。
 - 证书：宿主机 certbot 2.9.0（apt），`certbot certonly --webroot -w /var/www/certbot`。
