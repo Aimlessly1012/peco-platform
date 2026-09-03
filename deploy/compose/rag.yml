@@ -76,7 +76,11 @@ services:
   worker:
     build: ../../services/rag
     # 不跑 alembic：迁移由 backend 容器负责，两边同时改库会撞锁
-    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 -Q indexing
+    # --max-tasks-per-child=1（2026-09-03 线上止血）：summarizer / embedder / report_llm 是模块级单例，
+    # 各自持有 asyncio.Semaphore 与 AsyncOpenAI 客户端；Celery 每个任务 asyncio.run 起新循环，同一子进程
+    # 跑第二个任务时信号量报 "bound to a different event loop"（stage=summarize 必炸）。每任务换新进程是
+    # 运维层的兜底，根治要在代码里按事件循环创建这些对象（见 change fix-worker-loop-bound-singletons）。
+    command: uv run celery -A app.core.celery_app worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=1 -Q indexing
     env_file: ../../services/rag/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://raguser:ragpass@db:5432/ragcoder
