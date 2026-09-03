@@ -146,3 +146,11 @@ worker 服务有自己的 `build: ./backend` 段，compose 给它**独立命名�
 - 取码优先级：ls-remote 秒回 → bundle 恢复 + fetch 增量 → 任一环失败 fallback clone 远端。
   线上全链路实测过（`code_source` 字段区分 clone/bundle）。
 - compose 的 repos 卷暂保留（观察一周后单独移除）；缓存实证：全量重跑摘要 40/41、嵌入 151/152 命中。
+
+## 访问钥匙清理（2026-09-03）
+
+`~ubuntu/.ssh/authorized_keys` 只留两把：用户本机 `wangbt@1391.com` 与部署用 `claude-deploy-1776391635`。
+删掉的 `github-actions-deploy`（本仓库与其他仓库都没有工作流在用）与 `zc-erp-server`（项目已于 M12 下线）
+备份在同目录 `authorized_keys.bak-20260903`。注意：部署钥匙的私钥在用户 Mac 的 `~/.ssh/claude-deploy-tmp`，
+本机任何会话都能拿它登录，`auth.log` 只能定位到钥匙与来源 IP，定位不到是哪个会话——多会话并行操作服务器时
+要靠人来协调，日志不会替你区分。
