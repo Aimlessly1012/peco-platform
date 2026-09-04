@@ -49,8 +49,8 @@
 
 ## 6. 收口
 
-- [ ] 6.1 老仓库 GitHub archive，README 首行加指针「已并入 peco-platform，历史见本仓库或新仓库 `services/rag`」
+- [x] 6.1 老仓库 GitHub archive，README 首行加指针「已并入 peco-platform，历史见本仓库或新仓库 `services/rag`」 **✅ 2026-09-04**：README 首行加冻结横幅（指向 peco-platform 的 `services/rag/`，说明两边都有完整历史、锚点 `ceddadf`），提交 `9539b95` 推送后 `gh repo archive`，`isArchived=true` 已核实。仓库为 PRIVATE，转只读不影响任何公开引用
 - [x] 6.2 CLAUDE.md「边界：后端不在这个仓库」章节反转重写（本地文件，随维护者）。实际改了五处而非一处：命令节补后端/编排、CI 表述、边界章节反转、鉴权的跨仓路径、构建部署的 external network 段
 - [x] 6.3 README 架构段更新：三仓图 → 单仓多项目图；`openspec validate --strict` 收尾通过 **✅ 2026-09-04**：「后端不在本仓库」整段反转为单仓多项目（三行目录/工具链对照、两条链互不感知、平台不做 API 代理层、JWS 跨服务契约）；开发段补 `services/rag` 的 uv/pytest 与 `deploy/` 全栈命令，并写明基线零端口、开发端口只在 override 里、ports 是追加语义；`openspec validate --all --strict` 17/17 通过
 - [x] 6.5 `deploy/DEPLOY.md` 顶部加过时横幅：全文描述的是 M7 宿主 nginx 部署方式，已被容器化 nginx 取代——一段声明 + 指向现行方式（migration-baseline 与第 5 组清单），**不重写正文**（内容变更超出本 change）
-- [ ] 6.4 删除 `../RAG_coder/frontend/` 磁盘残骸（1.1G；5.5 观察期结束后执行，自 1.3 移入）
+- [x] 6.4 删除 `../RAG_coder/frontend/` 磁盘残骸（1.1G；5.5 观察期结束后执行，自 1.3 移入） **✅ 2026-09-04**：删前三重核对——git 零跟踪（M12 的 `3b3acf5` 已从版本库删除）、目录内零源文件（只有 `.next` 545M + `node_modules` 536M）、源码早已在 `app/rag/`。老仓库 1.5G → 489M，宿主可用 71G。同时查明 1.4 悬置的未提交改动 `backend/app/api/projects.py` 纯属格式化（import 排序 + 行宽折行 + 注释空格），无逻辑变更，随仓库冻结一并作废
