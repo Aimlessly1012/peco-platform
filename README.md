@@ -7,17 +7,34 @@
 /login     GitHub OAuth 登录
 /pending   待审核（申请人登录后落这里）
 /front     heitu 组件库展示
-/rag/*     RAG Coder 页面（阶段二自 RAG_coder/frontend 迁入）
+/rag/*     RAG Coder 页面（浏览器直连 /rag/api/* 取数，后端在 services/rag）
 /admin     用户审核
 ```
 
 ## 架构要点
 
-**后端不在本仓库**。RAG Coder 的后端（FastAPI + LangGraph + Neo4j + tree-sitter）
-保持独立服务，本平台通过 `/rag/api/*` 调用它——那套 Python 生态无法也不必并进 Next.js。
+**单仓多项目，但运行时仍是两个服务**。M16 起 RAG Coder 后端并入 `services/rag/`
+（FastAPI + LangGraph + Neo4j + tree-sitter，此前在独立仓库 RAG_coder）。
+「同一个仓库」不等于「同一个进程」：
 
-**数据库**与 RAG 后端共用同一个 Postgres：平台写 users（GitHub 登录 upsert、审核状态），
-后端只读校验。Neo4j 是 RAG 专用，平台不碰。
+```
+仓库根        app/ lib/ components/     Next.js 15 + TypeScript   npm / eslint / tsc
+services/rag  app/ tests/ alembic/      FastAPI + LangGraph        uv / pytest / alembic
+deploy/       docker-compose*.yml       两者的统一编排（项目名 peco）
+```
+
+两条工具链互不感知——`tsconfig.json` 与 eslint 都显式排除 `services/`，反之亦然。
+CI 也按路径分成两个 workflow，各管各的。
+
+**平台不做 API 代理层**。`/rag/*` 页面由浏览器直连 `/rag/api/*`（nginx 剥前缀转 FastAPI）：
+那层代理要转发 SSE 流式与 MCP 长连接，风险大于收益。`lib/rag/api.ts` 只是类型定义加 fetch 封装，
+不是服务端路由。
+
+**数据库**与 RAG 后端共用同一个 Postgres：平台写 `platform_users`（GitHub 登录 upsert、审核状态），
+后端只读校验。表名不叫 `users` 是因为 RAG 侧已有一张同名表。Neo4j 是 RAG 专用，平台不碰。
+
+**登录态是跨服务契约**。NextAuth 改签 JWS(HS256)（不是默认的 JWE），后端用同一个密钥直接验签
+同一个 cookie——签名可验、加密要解，只有 JWS 能让浏览器绕过平台直连后端。
 
 **视觉统一靠设计令牌**：`tailwind.config.ts` 与 RAG 前端同源（paper/ink/accent、
 IBM Plex Mono、无圆角）；`/front` 的 antd 组件经 ConfigProvider 适配同一套 token，
@@ -28,12 +45,33 @@ IBM Plex Mono、无圆角）；`/front` 的 antd 组件经 ConfigProvider 适配
 
 ## 开发
 
+平台（仓库根）：
+
 ```bash
 npm install
 cp .env.local.example .env.local   # 按注释填写，GitHub OAuth 凭据要自己申请
 npm run migrate                    # 建 platform_users 表（需要 Postgres 已启动）
-npm run dev
+npm run dev                        # :3000
 ```
+
+RAG 后端（`services/rag/`，独立工具链）：
+
+```bash
+cd services/rag && uv sync --group dev
+uv run pytest -m "not integration"   # 单测档，覆盖率门槛 78%
+uv run pytest -m integration --no-cov  # 集成档，需 Neo4j
+```
+
+依赖服务（Postgres / Neo4j / RabbitMQ / MinIO）与全栈：
+
+```bash
+cd deploy && docker compose up -d    # 开发端口由 docker-compose.override.yml 叠加
+```
+
+`docker-compose.yml` 加 `compose/*.yml` 是**生产安全基线**：零宿主端口、零 restart。
+开发端口只在默认发现时加载的 `docker-compose.override.yml` 里（db 5433、backend 9200、
+neo4j 7474/7687、MinIO 9100/9101、RabbitMQ 5673）。方向不能反——compose 的 `ports` 是追加语义，
+覆盖层删不掉基线里已有的映射，写反了就是把数据库挂到公网。
 
 ### 需要手动准备的东西
 
@@ -42,8 +80,8 @@ npm run dev
 | GitHub OAuth App | <https://github.com/settings/developers> 新建，回调填 `<站点地址>/api/auth/callback/github`，把 Client ID / Secret 写进 `.env.local` |
 | `NEXTAUTH_SECRET` | `openssl rand -base64 32` 生成 |
 | `ADMIN_GITHUB_ID` | 你的 GitHub **数字 id**（不是用户名）：`curl -s https://api.github.com/users/<用户名> \| grep '"id"'`。这个账号首次登录即 admin + approved，其余人一律 pending |
-| Postgres | 复用 RAG 那套 compose 的库（默认 `localhost:5433`）；`npm run migrate` 会建 `platform_users` 表 |
-| RAG 后端 | 页面直连同域 `/rag/api/*`（nginx 剥前缀转 FastAPI）。本地后端跑在别的端口时用 `NEXT_PUBLIC_RAG_API_BASE` 覆盖 |
+| Postgres | `deploy/` 那套 compose 起的库（开发端口 `localhost:5433`）；`npm run migrate` 会建 `platform_users` 表 |
+| RAG 后端 | 代码在 `services/rag/`，`.env` 另起一份（见该目录的 `.env.example`）。页面直连同域 `/rag/api/*`（nginx 剥前缀转 FastAPI），本地后端在别的端口时用 `NEXT_PUBLIC_RAG_API_BASE` 覆盖 |
 
 ### /front 的字段说明
 
