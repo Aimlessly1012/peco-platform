@@ -144,12 +144,17 @@ if $DO_COMPOSE; then
 fi
 
 # ── 健康检查 ────────────────────────────────────────────────────
+# 自己写重试循环，不用 curl 的 --retry：--max-time 限制的是**整个操作**（含重试），
+# 两者一起用会让重试根本没机会跑完就被截断，返回空码。backend 重建后要 30 秒上下
+# 才就绪（uvicorn 启动 + 字节码编译），照那样写必然误判为部署失败并触发无谓回滚。
 check() {
-    local url="$1" name="$2"
-    local code
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-        --retry 20 --retry-delay 3 --retry-all-errors --retry-connrefused "$url")"
-    log "  $name → $code"
+    local url="$1" name="$2" code="" i
+    for i in $(seq 1 40); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" || code=""
+        [ "$code" = "200" ] && break
+        sleep 3
+    done
+    log "  $name → ${code:-无响应}（${i} 次尝试）"
     [ "$code" = "200" ]
 }
 log "健康检查"
