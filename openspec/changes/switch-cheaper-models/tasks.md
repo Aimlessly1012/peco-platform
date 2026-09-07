@@ -29,11 +29,11 @@
 
 ## 5. 嵌入模型迁移（不可逆，严格按序，见 DEPLOY.md 附录 A）
 
-- [ ] 5.1 迁移前 `pg_dump` 一份（切栈时没做这一步的教训）
-- [ ] 5.2 停 worker——避免迁移中途有任务写入旧维度向量（D3）
-- [ ] 5.3 DROP 三个 Neo4j 向量索引（`chunk_embedding` / `file_summary_embedding` / `module_summary_embedding`，以 `graph/client.py` 的 `VECTOR_INDEXES` 为准）
-- [ ] 5.4 同时改 `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL=qwen3.7-text-embedding-flash` / `EMBEDDING_DIM=1024`——只改其一会被启动校验拦下，那是防护生效而非故障
-- [ ] 5.5 起 backend，确认三个向量索引按 1024 维自动重建、启动无维度冲突报错
+- [x] 5.1 迁移前 `pg_dump` 一份（切栈时没做这一步的教训） ✅ 04:28Z `~/backup/pg-20260907T042826Z.sql`（44 KB，1 个项目）
+- [x] 5.2 停 worker——避免迁移中途有任务写入旧维度向量（D3） ✅ 无运行中任务，worker 已停
+- [x] 5.3 DROP 三个 Neo4j 向量索引（`chunk_embedding` / `file_summary_embedding` / `module_summary_embedding`，以 `graph/client.py` 的 `VECTOR_INDEXES` 为准） ✅ 三个索引已 DROP。**发现第四个 VECTOR 索引 `entity`**（`__Entity__.embedding`，LlamaIndex `Neo4jPropertyGraphStore` 自建，配置无 `vector.dimensions`，维度无关），不在应用管理之列、不影响 1024 维写入，保留不动
+- [x] 5.4 同时改 `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL=qwen3.7-text-embedding-flash` / `EMBEDDING_DIM=1024`——只改其一会被启动校验拦下，那是防护生效而非故障 ✅ 四项同改，key 经 stdin，备份 `.env.bak-20260907T042845Z-embed`
+- [x] 5.5 起 backend，确认三个向量索引按 1024 维自动重建、启动无维度冲突报错 ✅ backend 5 次尝试内 200，启动日志「已创建 Neo4j 向量索引 ×3 (dim=1024)」，`SHOW INDEXES` 三个 =1024；worker 已起，容器内 `EMBEDDING_*` 与 key 哈希 `ef5d49885e` 一致；迁移前 Neo4j 339 节点（旧向量仍是 4096 维，待重索引覆盖）、内存 518 MiB
 - [ ] 5.6 起 worker，在 `/rag` 对 ColaMD 点重索引，确认任务统计里 `fallback_full_reason=embedding_model_changed`、`embedded_cached=0`
 - [ ] 5.7 记录 Neo4j 内存占用变化——4096 → 1024 维预期向量存储降约 75%，要有数
 

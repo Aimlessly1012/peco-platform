@@ -188,6 +188,8 @@ C up -d --force-recreate --no-deps worker        # 5.
 ```
 
 确认：任务 stats 的 `fallback_full_reason` 为 `embedding_model_changed`、`embedded_cached` 为 0。
+
+`SHOW INDEXES` 里还会看到第四个 VECTOR 索引 `entity`（`__Entity__.embedding`）：那是 LlamaIndex 属性图存储自建的，配置里不固定维度，与应用的三个索引无关，**不要 DROP 它**。
 迁移代价与项目数成正比，能早换别晚换。选型与验收门槛见 `openspec/changes/switch-cheaper-models/`。
 
 ## 附录 B：本地开发
