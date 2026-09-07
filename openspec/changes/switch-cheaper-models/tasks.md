@@ -23,8 +23,8 @@
 
 ## 4. 重排适配（代码，已派给执行会话）
 
-- [ ] 4.1 `app/core/config.py` 新增 `rerank_provider`（`cohere` 默认 | `dashscope`）；`reranker.py` 按 D7 分支；`tests/test_reranker.py` 补 dashscope 用例；`.env.example` 加说明
-- [ ] 4.2 审阅：cohere 路径零改动、全部既有测试原样、失败仍返回 None；`uv run pytest -m "not integration"` 全绿、覆盖率 ≥78%
+- [x] 4.1 `app/core/config.py` 新增 `rerank_provider`（`cohere` 默认 | `dashscope`）；`reranker.py` 按 D7 分支；`tests/test_reranker.py` 补 dashscope 用例；`.env.example` 加说明 已完成，见第 8 组（`338f3a1`）
+- [x] 4.2 审阅：cohere 路径零改动、全部既有测试原样、失败仍返回 None；`uv run pytest -m "not integration"` 全绿、覆盖率 ≥78% 审阅通过：cohere 路径 URL 拼法与请求体逐字未动，dashscope 分支 URL 原样用、`output` 缺失降级；本会话独立复跑 724 passed / 79.29%，重排用例 55 条全绿
 - [ ] 4.3 合入 main，自动部署构建 backend/worker；先**不**开启（`RERANK_*` 仍留空），等 1.6 的 WorkspaceId 与响应形状确认后再配
 
 ## 5. 嵌入模型迁移（不可逆，严格按序，见 DEPLOY.md 附录 A）
@@ -53,7 +53,7 @@
 - [ ] 7.4 `openspec validate --all --strict` 全过，归档本 change
 - [ ] 7.5 遗留议题登记（不在本次范围）：OOM 重跑导致摘要重烧、402 重试风暴、`usage` 字段未落日志导致成本无法按阶段归因
 
-## 7. DashScope 重排适配（代码准备，独立于 1–6 的模型切换流程）
+## 8. DashScope 重排适配（执行会话「后端」完成于 2026-09-07，代码准备，独立于 1–6）
 
 线上要把重排从硅基流动换成阿里百炼 `qwen3.7-text-rerank`，而两家接口方言不同：
 百炼的 URL 是含 WorkspaceId 的完整端点、请求体嵌套 `input`/`parameters`、结果在

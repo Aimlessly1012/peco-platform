@@ -32,6 +32,7 @@
 ### Modified Capabilities
 
 - `indexing-pipeline`: 「嵌入向量化」需求从写死 DashScope text-embedding-v3 改为供应商与模型由配置决定；新增更换嵌入模型时的迁移语义——旧向量 SHALL 全部失效重建，不允许新旧向量空间共存。
+- `code-chat`: 新增「重排服务商方言可切换」需求——`RERANK_PROVIDER` 选 `cohere`（默认，行为不变）或 `dashscope`（完整端点、嵌套体、`output.results`），失败仍降级为 None。
 
 ## Impact
 
