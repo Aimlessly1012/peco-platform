@@ -66,8 +66,26 @@ fi
 # 按决策不阻塞部署。但被中断的任务重跑时，若上一轮没走到 graph 阶段，摘要结果
 # 未落盘、缓存为空，那部分 LLM 调用要全价重烧——不记下来就会以「账单莫名偏高」
 # 的形式沉默流失。
-RUNNING="$(docker exec peco-db-1 psql -U raguser -d ragcoder -Atc \
-    "select count(*) from index_jobs where status='running';" 2>/dev/null || echo '?')"
+running_jobs() {
+    docker exec peco-db-1 psql -U raguser -d ragcoder -Atc \
+        "select count(*) from index_jobs where status='running';" 2>/dev/null || echo '?'
+}
+RUNNING="$(running_jobs)"
+
+# 逃生口（design D5）：workflow_dispatch 勾选「等待索引任务」时，客户端命令带 wait-jobs。
+# 经强制命令进来时客户端命令不会被执行，但会放在 SSH_ORIGINAL_COMMAND 里；手工执行时走位置参数。
+WAIT_JOBS=false
+case " ${SSH_ORIGINAL_COMMAND:-} $* " in *" wait-jobs "*) WAIT_JOBS=true ;; esac
+if $WAIT_JOBS && [ "$RUNNING" != "?" ] && [ "$RUNNING" != "0" ]; then
+    WAIT_DEADLINE=$(( $(date +%s) + 30 * 60 ))
+    log "等待 $RUNNING 个索引任务结束（上限 30 分钟）"
+    while [ "$RUNNING" != "0" ] && [ "$RUNNING" != "?" ]; do
+        [ "$(date +%s)" -lt "$WAIT_DEADLINE" ] || die "等待索引任务超时，放弃本次部署（未做任何改动）"
+        sleep 30; RUNNING="$(running_jobs)"
+    done
+    log "索引任务已结束"
+fi
+
 if [ "$RUNNING" != "0" ] && [ "$RUNNING" != "?" ]; then
     log "⚠ 本次部署将中断 $RUNNING 个运行中的索引任务：队列会重投递续跑，但摘要阶段的调用成本会重复产生"
 elif [ "$RUNNING" = "?" ]; then

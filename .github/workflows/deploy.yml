@@ -15,6 +15,10 @@ on:
         description: "跳过 CI 检查直接部署（紧急修复用）"
         type: boolean
         default: false
+      wait_for_jobs:
+        description: "有索引任务在跑时先等它结束再部署（上限 30 分钟；默认不等，任务由队列重投递）"
+        type: boolean
+        default: false
 
 # 不取消进行中的部署：做到一半被杀会留下容器与镜像标签不一致的中间态，
 # 排队等前一次做完更安全。
@@ -83,11 +87,14 @@ jobs:
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
+          WAIT: ${{ inputs.wait_for_jobs }}
         run: |
           # 服务器侧 authorized_keys 用 command="…/deploy.sh",restrict 把这把 key 钉死在
-          # 部署脚本上，这里传什么命令都只会执行部署——写 deploy 只是为了日志可读。
+          # 部署脚本上，这里传的命令不会被执行，只会原样进 SSH_ORIGINAL_COMMAND——
+          # 脚本从中读 wait-jobs 标记决定要不要等索引任务。
+          CMD=deploy; [ "$WAIT" = "true" ] && CMD="deploy wait-jobs"
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=15 \
-              "$USER@$HOST" deploy
+              "$USER@$HOST" "$CMD"
 
       - name: 清理凭据
         if: always()

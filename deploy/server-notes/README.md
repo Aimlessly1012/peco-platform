@@ -154,3 +154,34 @@ worker 服务有自己的 `build: ./backend` 段，compose 给它**独立命名�
 备份在同目录 `authorized_keys.bak-20260903`。注意：部署钥匙的私钥在用户 Mac 的 `~/.ssh/claude-deploy-tmp`，
 本机任何会话都能拿它登录，`auth.log` 只能定位到钥匙与来源 IP，定位不到是哪个会话——多会话并行操作服务器时
 要靠人来协调，日志不会替你区分。
+
+## 自动部署（2026-09-07，change: auto-deploy-from-ci）
+
+push 到 main 后 `.github/workflows/deploy.yml` 自动跑：先查该 commit 的 check runs——全成功放行、
+有失败中止、一个都没有（改的是 `deploy/` 或文档）也放行——再经受限 key SSH 执行
+`deploy/scripts/deploy.sh`。脚本按「上次成功部署的 commit」到 HEAD 的 diff 决定范围，成功才写
+`~/peco/.last-deployed-sha`，失败不写，所以连推几次只成功最后一次也不会漏变更。
+
+**本文里所有 rsync 相关的坑已随 M16 的 git clone 化失效**：服务器 `~/peco` 是 main 的 clone，
+不再 rsync。但「nginx 单文件挂载换 inode 要 force-recreate」这条仍成立，git 替换文件同样换
+inode，脚本已固化处理。
+
+**deploy key 是受限的**：`authorized_keys` 里那行 `deploy-from-ci` 带
+`command="/home/ubuntu/peco/deploy/scripts/deploy.sh",restrict`，持有私钥只能触发部署，
+传什么命令都不会被执行（客户端命令进 `SSH_ORIGINAL_COMMAND`，脚本只从中读 `wait-jobs` 标记）。
+私钥唯一副本在仓库 Secrets `DEPLOY_SSH_KEY`；丢了就重新生成一把，成本极低。
+
+**脚本的自举依赖**：脚本先 `git merge --ff-only origin/main` 再 `exec` 新版本的自己，所以脚本
+改坏了下一次部署就会用坏版本。救法：用人工运维密钥（`wangbt@1391.com` 或 `claude-deploy`）
+登录，在 `~/peco` 手工 `git revert` 或 checkout 到上一个好版本再跑一次脚本。**永远不要删掉最后
+一把不受限的密钥**。
+
+**回滚点只保留一代**：构建前把 `peco-backend/worker/platform:latest` 打成 `:previous`，健康
+检查失败自动切回。连续两次坏部署会失去回滚点，那时人本来就该介入。
+
+**按决策不阻塞索引任务**：部署会杀掉正在跑的索引任务，Celery `acks_late` 让它重投递续跑，但
+摘要阶段若未走到 graph 落盘，那部分 LLM 调用要全价重烧。脚本会在日志里记「本次中断 N 个任务」，
+大仓库索引期间要发布用 workflow_dispatch 勾 `wait_for_jobs`（上限 30 分钟）。
+
+首次后端部署（run 34076155336）撞了一个健康检查 bug：`curl --max-time` 会截断 `--retry`，
+backend 30 秒启动期内必判失败并触发回滚。线上全程无感，也顺带验证了回滚路径。已改为自写重试。
