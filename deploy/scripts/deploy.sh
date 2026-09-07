@@ -98,8 +98,22 @@ $DO_BACKEND  && tag_previous peco-backend peco-worker
 $DO_PLATFORM && tag_previous peco-platform
 [ ${#ROLLBACK_IMAGES[@]} -gt 0 ] && log "回滚点已标记：${ROLLBACK_IMAGES[*]}"
 
-# ── compose 语法先于生效 ────────────────────────────────────────
+# ── 配置语法先于生效 ────────────────────────────────────────────
 "${COMPOSE[@]}" config -q || die "docker compose config 校验失败，未做任何改动"
+
+# nginx 配置的语法 compose 查不出来（那是 nginx 的事），而 nginx 分支不构建镜像、
+# 没有镜像回滚点——配置写错就只能等健康检查失败后人工救。用一次性容器按相同挂载
+# 先 nginx -t，把错误拦在重建之前。
+if $DO_NGINX; then
+    log "校验 nginx 配置"
+    docker run --rm \
+        -v "$REPO/deploy/nginx/nginx-server.conf:/etc/nginx/conf.d/default.conf:ro" \
+        -v "$REPO/deploy/nginx/projects:/etc/nginx/projects:ro" \
+        -v /etc/letsencrypt:/etc/letsencrypt:ro \
+        -v /var/www/certbot:/var/www/certbot:ro \
+        nginx:alpine nginx -t 2>&1 | sed 's/^/    /' \
+        || die "nginx 配置语法错误，未做任何改动"
+fi
 
 # ── 构建与重建 ──────────────────────────────────────────────────
 # backend 与 worker 共用 services/rag 构建上下文，但 compose 给它们独立镜像：
