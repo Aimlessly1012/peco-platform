@@ -25,7 +25,7 @@
 
 - [x] 4.1 `app/core/config.py` 新增 `rerank_provider`（`cohere` 默认 | `dashscope`）；`reranker.py` 按 D7 分支；`tests/test_reranker.py` 补 dashscope 用例；`.env.example` 加说明 已完成，见第 8 组（`338f3a1`）
 - [x] 4.2 审阅：cohere 路径零改动、全部既有测试原样、失败仍返回 None；`uv run pytest -m "not integration"` 全绿、覆盖率 ≥78% 审阅通过：cohere 路径 URL 拼法与请求体逐字未动，dashscope 分支 URL 原样用、`output` 缺失降级；本会话独立复跑 724 passed / 79.29%，重排用例 55 条全绿
-- [ ] 4.3 合入 main，自动部署构建 backend/worker；先**不**开启（`RERANK_*` 仍留空），等 1.6 的 WorkspaceId 与响应形状确认后再配
+- [x] 4.3 合入 main，自动部署构建 backend/worker；先**不**开启（`RERANK_*` 仍留空），等 1.6 的 WorkspaceId 与响应形状确认后再配 **✅ 2026-09-07 04:19Z**：`b62b055` 自动部署，backend/worker 重建、容器内已含 `rerank_provider`，`RERANK_*` 仍空，公网 200/200
 
 ## 5. 嵌入模型迁移（不可逆，严格按序，见 DEPLOY.md 附录 A）
 
