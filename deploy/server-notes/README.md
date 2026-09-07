@@ -185,3 +185,14 @@ inode，脚本已固化处理。
 
 首次后端部署（run 34076155336）撞了一个健康检查 bug：`curl --max-time` 会截断 `--retry`，
 backend 30 秒启动期内必判失败并触发回滚。线上全程无感，也顺带验证了回滚路径。已改为自写重试。
+
+## 模型供应商切到阿里百炼（2026-09-07）
+
+四个槽位：`CHAT/SUMMARY=qwen3.8-flash`（默认开思考，摘要 5.8s/444 token，关思考 1.3s/66——`LLM_ENABLE_THINKING`
+开关待落地）、`EMBEDDING=qwen3.7-text-embedding` 1024 维、`RERANK=qwen3.7-text-rerank`（适配已合入，`RERANK_*`
+待 WorkspaceId 后开启）。key 在 `services/rag/.env`，容器内 sha 前缀 `ef5d49885e`。
+
+**别用 `qwen3.7-text-embedding-flash`**：它的服务端对约一半真实尺寸的输入体挂起不响应（请求被完整 ACK、零重传、
+永不回包），境内外两地一致，与网络无关。排查时曾怀疑跨境 MTU 黑洞——IPv4 DF ping 1500 到阿里入口确实丢，但
+`ss -ti` 显示对方 MSS 1424、根本没发 1500 字节的包，那条线索是干扰项。所有临时改动（MSS 钳制、TSO/GSO、
+MTU 1500、TCP 选项、`tcp_mtu_probing`）均已还原，宿主网络配置与切换前一致。

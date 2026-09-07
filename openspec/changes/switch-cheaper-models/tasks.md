@@ -53,7 +53,20 @@
 - [ ] 7.4 `openspec validate --all --strict` 全过，归档本 change
 - [ ] 7.5 遗留议题登记（不在本次范围）：OOM 重跑导致摘要重烧、402 重试风暴、`usage` 字段未落日志导致成本无法按阶段归因
 
-## 8. DashScope 重排适配（执行会话「后端」完成于 2026-09-07，代码准备，独立于 1–6）
+## 8. 嵌入模型改选（2026-09-07 实施中发现，用户定案的 flash 在服务端挂起）
+
+首个真实索引（`multi-agent-system-using-langgraph`，30 文件 126 块）在 embed 阶段 6/17 批后
+`APITimeoutError` 失败，26 次摘要调用白烧。逐层排查（tcpdump 证明请求被百炼完整 ACK 却 15 秒不回
+一个字节；换入口 IP、关 TSO/GSO、降 MTU、关 TCP 选项、MSS 钳制全部无效并已还原；境内 Mac 发同样
+请求体同样挂起）后定性：**`qwen3.7-text-embedding-flash` 的服务端对约一半的输入体不响应**，与网络、
+区域无关；同请求体发 `qwen3.7-text-embedding` / `text-embedding-v4` 两地全通，对话端点全通。
+
+- [x] 8.1 服务器 `EMBEDDING_MODEL` 改为 `qwen3.7-text-embedding`（同家族、默认 1024 维，三个向量索引不用重建，模型名变化会触发全量重嵌入），单价 ¥0.5/M 而非 flash 的 ¥0.125/M
+- [ ] 8.2 用户对两个项目点重索引，确认 embed 阶段走完、`fallback_full_reason=embedding_model_changed`、节点向量 1024 维
+- [ ] 8.3 教训落进 design D2：探针只发了几十字节的小请求所以没抓到——**探针必须包含真实尺寸（批 10 × 3000 字符）的请求体**
+- [ ] 8.4 若阿里后续修复 flash，可按附录 A 的「仅换模型名」路径切回（维度不变，只需全量重嵌入）
+
+## 9. DashScope 重排适配（执行会话「后端」完成于 2026-09-07，代码准备，独立于 1–6）
 
 线上要把重排从硅基流动换成阿里百炼 `qwen3.7-text-rerank`，而两家接口方言不同：
 百炼的 URL 是含 WorkspaceId 的完整端点、请求体嵌套 `input`/`parameters`、结果在
