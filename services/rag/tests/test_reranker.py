@@ -433,3 +433,142 @@ async def test_document_field_is_not_requested(rerank_on, monkeypatch):
 
     body = json.loads(seen[0].content)
     assert "return_documents" not in body
+
+
+# ---------------- DashScope 方言（阿里百炼 text-rerank） ----------------
+#
+# 与 cohere 的差异只有三处：URL 是完整端点（不拼 /rerank）、请求体嵌套
+# input/parameters、结果多包一层 output。排名解析与降级行为完全共用，
+# 所以这一节只测差异，不重复覆盖 parse_ranking 的各种坏形状。
+
+DASHSCOPE_URL = (
+    "https://ws-placeholder.cn-beijing.maas.aliyuncs.com"
+    "/api/v1/services/rerank/text-rerank/text-rerank"
+)
+
+
+@pytest.fixture
+def rerank_dashscope(monkeypatch):
+    monkeypatch.setattr(settings, "rerank_provider", "dashscope")
+    monkeypatch.setattr(settings, "rerank_base_url", DASHSCOPE_URL)
+    monkeypatch.setattr(settings, "rerank_api_key", "test-key")
+    monkeypatch.setattr(settings, "rerank_model", "qwen3.7-text-rerank")
+
+
+def dashscope_ok(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={
+        "output": {"results": [
+            {"index": 2, "relevance_score": 0.9},
+            {"index": 0, "relevance_score": 0.5},
+            {"index": 1, "relevance_score": 0.1},
+        ]},
+        "usage": {"total_tokens": 120},
+        "request_id": "req-sample",
+    })
+
+
+async def test_dashscope_url_is_used_verbatim(rerank_dashscope, monkeypatch):
+    """完整端点，绝不能再拼 /rerank——拼了就 404，而 404 会静默降级成「重排没生效」。"""
+    seen = mock_transport(monkeypatch, dashscope_ok)
+
+    await rerank("查询", ["甲", "乙", "丙"])
+
+    assert str(seen[0].url) == DASHSCOPE_URL
+    assert not str(seen[0].url).endswith("/rerank")
+
+
+async def test_dashscope_request_body_is_nested(rerank_dashscope, monkeypatch):
+    """model 在顶层，query/documents 进 input，top_n 进 parameters。"""
+    import json
+
+    seen = mock_transport(monkeypatch, dashscope_ok)
+    await rerank("订单创建", ["甲", "乙", "丙"], top_n=2)
+
+    body = json.loads(seen[0].content)
+    assert body["model"] == "qwen3.7-text-rerank"
+    assert body["input"] == {"query": "订单创建", "documents": ["甲", "乙", "丙"]}
+    assert body["parameters"] == {"top_n": 2}
+    # 扁平字段不该出现，否则说明走的还是 cohere 分支
+    assert "query" not in body and "documents" not in body and "top_n" not in body
+
+
+async def test_dashscope_parses_nested_response(rerank_dashscope, monkeypatch):
+    mock_transport(monkeypatch, dashscope_ok)
+
+    assert await rerank("q", ["甲", "乙", "丙"]) == [(2, 0.9), (0, 0.5), (1, 0.1)]
+
+
+async def test_dashscope_shares_truncation_and_placeholder(rerank_dashscope, monkeypatch):
+    """截断与空文档占位是共用逻辑，换方言不该丢——嵌套结构下同样生效。"""
+    import json
+
+    seen = mock_transport(monkeypatch, dashscope_ok)
+    await rerank("q", ["x" * 5000, "", "正文"])
+
+    docs = json.loads(seen[0].content)["input"]["documents"]
+    assert len(docs[0]) == settings.rerank_max_chars
+    assert docs[1] == " "
+
+
+async def test_dashscope_top_n_never_exceeds_document_count(rerank_dashscope, monkeypatch):
+    import json
+
+    seen = mock_transport(monkeypatch, dashscope_ok)
+    await rerank("q", ["甲", "乙"], top_n=50)
+
+    assert json.loads(seen[0].content)["parameters"]["top_n"] == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},                                                  # 整个 output 缺失
+        {"output": None},
+        {"output": "不是对象"},
+        {"output": {}},                                      # 有 output 但没 results
+        {"output": {"results": []}},
+        {"results": [{"index": 0, "relevance_score": 0.5}]},  # 忘了包 output（顶层不认）
+    ],
+)
+async def test_dashscope_bad_envelope_degrades_to_none(
+    rerank_dashscope, monkeypatch, payload
+):
+    """取不到 output 一律降级，问答保持原顺序。"""
+    mock_transport(monkeypatch, lambda r: httpx.Response(200, json=payload))
+    assert await rerank("q", ["甲", "乙"]) is None
+
+
+async def test_dashscope_error_body_degrades(rerank_dashscope, monkeypatch):
+    """百炼错误响应形如 {"code","message","request_id"}，没有 output。"""
+    mock_transport(monkeypatch, lambda r: httpx.Response(
+        400, json={"code": "InvalidApiKey", "message": "Invalid API-key", "request_id": "r"}
+    ))
+    assert await rerank("q", ["甲", "乙"]) is None
+
+
+def test_unwrap_results_is_identity_for_cohere(rerank_on):
+    """cohere 分支必须原样透传——这条是「一行不改」的机器化断言。"""
+    payload = {"results": [{"index": 0, "relevance_score": 0.5}]}
+    assert reranker.unwrap_results(payload) is payload
+
+
+def test_unwrap_results_takes_output_for_dashscope(rerank_dashscope):
+    inner = {"results": [{"index": 0, "relevance_score": 0.5}]}
+    assert reranker.unwrap_results({"output": inner}) is inner
+
+
+def test_default_provider_is_cohere():
+    """默认值决定不配置 RERANK_PROVIDER 时的行为，不能被顺手改掉。"""
+    from app.core.config import Settings
+
+    assert Settings().rerank_provider == "cohere"
+
+
+def test_unknown_provider_falls_back_to_cohere(rerank_on, monkeypatch):
+    """写错 provider 时退回 cohere，而不是拼出一个谁也不认识的请求。"""
+    monkeypatch.setattr(settings, "rerank_provider", "typo-provider")
+
+    url, body = reranker.build_request("q", ["甲"], top_n=1)
+
+    assert url.endswith("/rerank")
+    assert body["query"] == "q"

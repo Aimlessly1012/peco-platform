@@ -1,8 +1,17 @@
-"""重排（rerank）客户端（M7 D2）：硅基流动 /v1/rerank，Cohere 风格接口。
+"""重排（rerank）客户端（M7 D2）。
 
-不是 OpenAI 标准接口，所以不走 openai SDK，httpx 直调：
-    POST {base}/rerank  {"model", "query", "documents": [...], "top_n"}
-    → {"id", "results": [{"index", "document": null, "relevance_score"}, ...], "meta"}
+不是 OpenAI 标准接口，所以不走 openai SDK，httpx 直调。支持两种服务商方言，
+由 `RERANK_PROVIDER` 选择——**两者只在 URL 拼法、请求体形状与结果层级上不同，
+排名解析与降级行为完全共用**：
+
+    cohere（默认，硅基流动）
+        POST {base}/rerank   {"model", "query", "documents": [...], "top_n"}
+        → {"id", "results": [{"index", "document": null, "relevance_score"}], "meta"}
+
+    dashscope（阿里百炼 text-rerank）
+        POST {base}         base_url 就是完整端点（含 WorkspaceId），不再拼后缀
+        {"model", "input": {"query", "documents"}, "parameters": {"top_n"}}
+        → {"output": {"results": [{"index", "relevance_score"}]}, "usage", "request_id"}
 
 实测（硅基流动 Qwen3-Reranker-8B）：results 已按分数降序、document 回显 null
 （不请求 return_documents，省流量）；错误响应形如 {"code", "data", "message"}，
@@ -55,6 +64,44 @@ def parse_ranking(payload: dict, doc_count: int) -> list[tuple[int, float]] | No
     return ranking
 
 
+DASHSCOPE = "dashscope"
+
+
+def build_request(
+    query: str, documents: list[str], top_n: int | None = None
+) -> tuple[str, dict]:
+    """按 provider 组装 (url, 请求体)。"""
+    docs = _prepare(documents)
+    n = min(top_n or len(documents), len(documents))
+    if settings.rerank_provider == DASHSCOPE:
+        # base_url 已是完整端点（含 WorkspaceId），拼后缀会 404
+        return settings.rerank_base_url, {
+            "model": settings.rerank_model,
+            "input": {"query": query, "documents": docs},
+            "parameters": {"top_n": n},
+        }
+    return settings.rerank_base_url.rstrip("/") + "/rerank", {
+        "model": settings.rerank_model,
+        "query": query,
+        "documents": docs,
+        "top_n": n,
+    }
+
+
+def unwrap_results(data: object) -> object:
+    """取出含 results 的那一层：百炼多包了一层 output，其余原样透传。
+
+    output 缺失或不是对象时返回 None——交给 parse_ranking 走降级，
+    不在这里抛异常（错误哲学：精排失败绝不阻塞问答）。
+    """
+    if settings.rerank_provider != DASHSCOPE:
+        return data
+    if not isinstance(data, dict):
+        return None
+    output = data.get("output")
+    return output if isinstance(output, dict) else None
+
+
 async def rerank(
     query: str, documents: list[str], top_n: int | None = None
 ) -> list[tuple[int, float]] | None:
@@ -62,13 +109,7 @@ async def rerank(
     if not is_enabled() or not query or not documents:
         return None
 
-    payload = {
-        "model": settings.rerank_model,
-        "query": query,
-        "documents": _prepare(documents),
-        "top_n": min(top_n or len(documents), len(documents)),
-    }
-    url = settings.rerank_base_url.rstrip("/") + "/rerank"
+    url, payload = build_request(query, documents, top_n)
     try:
         async with httpx.AsyncClient(timeout=settings.rerank_timeout_seconds) as client:
             response = await client.post(
@@ -85,7 +126,7 @@ async def rerank(
         logger.warning("rerank 调用失败（%s: %s），保持原有排序", type(e).__name__, e)
         return None
 
-    ranking = parse_ranking(data, len(documents))
+    ranking = parse_ranking(unwrap_results(data), len(documents))
     if ranking is None:
         logger.warning("rerank 响应无法解析，保持原有排序")
     return ranking

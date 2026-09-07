@@ -31,10 +31,16 @@ class Settings(BaseSettings):
     summary_concurrency: int = 4
 
     # M7 D2：检索精排。base_url/api_key/model 任一为空 = 关闭（行为与 M6 完全一致）。
-    # base_url 不带资源后缀，客户端自己拼 /rerank
     rerank_base_url: str = ""
     rerank_api_key: str = ""
     rerank_model: str = ""
+    # 重排服务商的接口方言。两家的 URL 拼法、请求体与响应层级都不同：
+    #   cohere    —— base_url 不带资源后缀，客户端拼 /rerank；扁平请求体；顶层 results
+    #                （硅基流动走这套）
+    #   dashscope —— base_url 即完整端点（含 WorkspaceId），不再拼后缀；
+    #                请求体嵌套 input/parameters；结果在 output.results（阿里百炼）
+    # 默认 cohere：不配置此项时行为与切换前逐字节一致
+    rerank_provider: str = "cohere"
     # 5s 实测经常超时（16 篇 + 8B 重排 + 跨境），精排一直静默降级等于白配
     rerank_timeout_seconds: float = 15
     rerank_max_chars: int = 1500      # 单篇文档截断：8B 重排模型上下文有限，长文不增益

@@ -52,3 +52,19 @@
 - [ ] 7.3 硅基流动那把 key 从两份 `.env`（本地与服务器）里移除；本地 `services/rag/.env` 的嵌入配置与线上对齐，消除 2.1 提到的漂移
 - [ ] 7.4 `openspec validate --all --strict` 全过，归档本 change
 - [ ] 7.5 遗留议题登记（不在本次范围）：OOM 重跑导致摘要重烧、402 重试风暴、`usage` 字段未落日志导致成本无法按阶段归因
+
+## 7. DashScope 重排适配（代码准备，独立于 1–6 的模型切换流程）
+
+线上要把重排从硅基流动换成阿里百炼 `qwen3.7-text-rerank`，而两家接口方言不同：
+百炼的 URL 是含 WorkspaceId 的完整端点、请求体嵌套 `input`/`parameters`、结果在
+`output.results`。这一组只做代码侧适配，不动服务器配置——切换动作归第 3/4 组。
+
+- [x] 7.1 `config.py` 新增 `rerank_provider`（`cohere` | `dashscope`），默认 `cohere`——不配置时行为与切换前逐字节一致
+- [x] 7.2 `reranker.py` 抽出 `build_request()` 与 `unwrap_results()` 两个分派点，cohere 分支一行未改；dashscope 下 base_url 原样用作完整端点、请求体嵌套、结果自 `output` 取出
+- [x] 7.3 失败哲学与共用预处理不变：截断、空文档占位、超时/异常/坏响应降级为 None 对两种方言一致
+- [x] 7.4 `tests/test_reranker.py` 补 16 条 dashscope 用例（URL 不被追加后缀、请求体嵌套形状、嵌套响应解析、`output` 六种缺失形态降级、共用截断与占位仍生效、未知 provider 退回 cohere）；现有 39 条 cohere 用例全部保留且未改动
+- [x] 7.5 `.env.example` 重排段加 `RERANK_PROVIDER` 说明与百炼示例（WorkspaceId 用占位符）；顺带修掉「调用超时(5s)」——`rerank_timeout_seconds` 实际默认 15
+- [x] 7.6 `uv run pytest -m "not integration"` 全绿：724 passed / 2 skipped，覆盖率 79.29%（门槛 78%）
+
+> 未知 provider 值退回 cohere 而非报错：重排是可降级链路，配置写错不该让问答链路启动失败。
+> 代价是拼写错误不会被立刻发现——由 7.4 的用例把这个取舍钉住。
