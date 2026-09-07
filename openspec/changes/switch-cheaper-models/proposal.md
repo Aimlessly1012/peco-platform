@@ -10,14 +10,18 @@
 
 ## What Changes
 
-- **摘要模型**：`SUMMARY_MODEL` 从 `deepseek-ai/DeepSeek-V4-Flash` 换成低价候选（`Qwen/Qwen3.5-35B-A3B` ¥0.40 或 `inclusionAI/Ling-mini-2.0` ¥0.50）。它同时驱动三级摘要与理解报告生成，改一个字符串即全部生效，不影响任何历史数据。
-- **嵌入模型**：`EMBEDDING_MODEL` 从 `Qwen/Qwen3-Embedding-8B`（4096 维）换成 `BAAI/bge-m3`（1024 维）。**BREAKING**：维度变更使已有向量全部失效，必须 DROP 三个向量索引并重索引全部项目。附带收益是向量存储降约 75%，缓解这台 3.6G 机器的内存压力。
-- **重排模型**：`RERANK_MODEL` 从 `Qwen/Qwen3-Reranker-8B` 换成 `BAAI/bge-reranker-v2-m3`。量小，顺带做。
+**供应商整体切到阿里百炼 DashScope（用户决定，2026-09-07）**，`baseUrl` 统一为
+`https://dashscope.aliyuncs.com/compatible-mode/v1`，嵌入与对话共用同一把 key。四个槽位的定案：
+
+- **摘要模型** `SUMMARY_MODEL`：`deepseek-ai/DeepSeek-V4-Flash`（¥1.5–3 / ¥4.5–9）→ `qwen3.8-flash`（¥1 / ¥3）。它同时驱动三级摘要与理解报告生成，改一个字符串即全部生效，不影响任何历史数据。
+- **问答模型** `CHAT_MODEL`：`Qwen/Qwen3-Coder-30B-A3B-Instruct` → `qwen3.8-flash`。在线问答的回答生成走它；`GENERATE_MODEL` 留空复用。
+- **嵌入模型** `EMBEDDING_MODEL` + `EMBEDDING_DIM`：`Qwen/Qwen3-Embedding-8B`（4096 维）→ `qwen3.7-text-embedding-flash`（1024 维，¥0.125/M）。**BREAKING**：维度变更使已有向量全部失效，必须 DROP 三个向量索引并重索引全部项目。附带收益是向量存储降约 75%。
+- **重排模型** `RERANK_MODEL`：`Qwen/Qwen3-Reranker-8B` → `qwen3.7-text-rerank`。**需要代码适配**：百炼这个模型走原生嵌套格式与带 WorkspaceId 的独立域名，现有客户端是 Cohere 风格，加一个 `RERANK_PROVIDER` 开关（默认 `cohere`，行为不变）。
 - **质量验收**：换模型前后各跑一次既有的真实模型评测档（`scripts/eval_retrieval.py` + `tests/eval/golden_set.json`），用指标对比而非主观判断决定是否保留新模型。
 - **规格修正**：「嵌入向量化」需求去掉写死的供应商与模型名，改为配置驱动的表述，并补上「更换嵌入模型是一次受控迁移」的行为约定。
-- **文档修正**：`.env.example` 声称「本项目当前不下发 dimensions 参数」，而 `embedder.py:47` 实际下发。这条注释误导性地关闭了 MRL 降维这个选项。
+- **文档修正**：`.env.example` 关于 `dimensions` 参数的错误说明已随 `5353a4a` 修正（自动部署验证时顺手做的）。
 
-不做的事：不引入运行时可插拔的多供应商配置层（那是独立议题），不改重试与并发策略，不动 `CHAT_MODEL`（在线问答链路，本次不涉及）。
+不做的事：不引入运行时可插拔的多供应商配置层（那是独立议题），不改重试与并发策略。
 
 ## Capabilities
 
@@ -35,4 +39,5 @@
 - **数据**：Neo4j 三个向量索引需 DROP 重建；全部项目需重索引（当前仅 ColaMD 一个）。
 - **规格**：`openspec/specs/indexing-pipeline/spec.md` 的「嵌入向量化」需求。
 - **不涉及代码逻辑**：模型名与维度本就是配置项，`pipeline.py:431` 已有模型漂移检测、`graph/client.py:50` 已有维度校验，两者都会在迁移中自动生效。
-- **前置依赖**：账户需先充值——余额为 0 时所有模型（含标称免费的 `BAAI/bge-m3`）一律返回 402，候选模型的可用性与实际维度因此尚未实测。
+- **前置依赖**：用户的百炼 key 需先放进本地 `~/.peco-dashscope.key`（600 权限，脚本读文件不回显），探针用它实测四个模型的可用性与嵌入实际返回维度；重排还需要百炼控制台的 WorkspaceId。
+- **代码改动**：`services/rag/app/services/retrieval/reranker.py` 与 `app/core/config.py` 加 provider 开关（已派给执行会话）。
