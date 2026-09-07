@@ -33,6 +33,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# 样板文件例外：它们只含占位值，且 README 的 cp 步骤依赖它们存在于克隆副本里。
+# 入库前逐键核查过（2026-09-07）。真值文件仍被上面的 .env* 挡住。
+!.env.local.example
+!.env.production.example
 
 # vercel
 .vercel
