@@ -1,0 +1,94 @@
+name: 部署
+
+# 触发用 push 而不是 workflow_run（挂在两个 CI 下游）：`deploy/nginx/**` 与
+# `deploy/*.yml` 不在任何 CI 的 paths 过滤内，改它们时两个 CI 都不跑，下游模式
+# 会让这类改动永远等不到触发——而 nginx 单文件挂载那个坑恰恰就出在这里。
+# 所以这里全量触发，由 wait-ci 这一步自己判断该不该等、等谁。
+#
+# 显式不响应 pull_request：fork 的 PR 本就拿不到 Secrets，但写清楚比依赖默认行为可靠。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_ci_check:
+        description: "跳过 CI 检查直接部署（紧急修复用）"
+        type: boolean
+        default: false
+
+# 不取消进行中的部署：做到一半被杀会留下容器与镜像标签不一致的中间态，
+# 排队等前一次做完更安全。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 部署到生产
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 等待本次 commit 的 CI 结论
+        if: ${{ !inputs.skip_ci_check }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 竞态：push 之后 deploy 可能比 CI 更早被调度，此时 check runs 还是空的，
+          # 直接判定「没有 CI」会把未经测试的 commit 放上线。先给 GitHub 45 秒注册。
+          sleep 45
+
+          DEADLINE=$(( $(date +%s) + 15 * 60 ))
+          while :; do
+            # 排除本工作流自身的 check（job 名为「部署到生产」），否则会等自己
+            RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
+                    --jq '.check_runs[] | select(.name != "部署到生产") | "\(.name)\t\(.status)\t\(.conclusion // "-")"')
+
+            if [ -z "$RUNS" ]; then
+              echo "本次 commit 未触发任何 CI（改动在 deploy/ 或文档），放行"
+              break
+            fi
+
+            echo "$RUNS" | sed 's/^/  /'
+
+            if echo "$RUNS" | grep -qP '\t(failure|cancelled|timed_out|action_required)$'; then
+              echo "::error::有 CI 检查未通过，中止部署"
+              exit 1
+            fi
+
+            if ! echo "$RUNS" | grep -qvP '\tcompleted\t'; then
+              echo "全部 CI 检查已完成且无失败，放行"
+              break
+            fi
+
+            [ "$(date +%s)" -lt "$DEADLINE" ] || { echo "::error::等待 CI 超时（15 分钟）"; exit 1; }
+            echo "  仍有检查在进行，30 秒后重试"
+            sleep 30
+          done
+
+      - name: 准备 SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # 固定主机指纹而不是 StrictHostKeyChecking=no：后者对中间人毫无抵抗
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 执行部署
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # 服务器侧 authorized_keys 用 command="…/deploy.sh",restrict 把这把 key 钉死在
+          # 部署脚本上，这里传什么命令都只会执行部署——写 deploy 只是为了日志可读。
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=15 \
+              "$USER@$HOST" deploy
+
+      - name: 清理凭据
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
