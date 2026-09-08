@@ -92,13 +92,13 @@ clone → parse → summarize ──────► embed ──────► 
 
 ### D7：重排通过 provider 开关适配，不改现有路径
 
-`qwen3.7-text-rerank` 的接口与现有 Cohere 风格客户端有三处不同：完整端点 URL 带 WorkspaceId（`https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`）、请求体嵌套在 `input` / `parameters` 下、响应在 `output.results`。
+`qwen3.7-text-rerank` 的接口与现有 Cohere 风格客户端有三处不同：完整端点 URL（官方 `https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank`，**不需要 WorkspaceId**——此前文档抓到的 maas 业务空间域名是另一套入口）、请求体嵌套在 `input` / `parameters` 下、响应在 `output.results`。
 
 做法：`rerank_provider` 配置项，默认 `cohere`（一行不改，硅基流动路径与全部既有测试原样），`dashscope` 时 URL 直接取 `rerank_base_url` 不再拼 `/rerank`、体改嵌套、响应先剥 `output` 再交给现有 `parse_ranking`。失败哲学不变：任何异常都返回 None，问答保持原顺序。
 
 **替代方案**：改选 `qwen3-rerank`（百炼的 OpenAI 兼容路径，扁平体），只差路径 `/reranks` 一个字母。否决——同样要改代码，而且那条路径也要 WorkspaceId 域名，省不下什么；用户已定案 `qwen3.7-text-rerank`。
 
-**为什么不先留空**：留空即退回 RRF，零风险，但用户明确要重排。适配本身十几行且有 mock 测试兜底，风险可控；真正的未知是 WorkspaceId 与限速，都在探针阶段解决。
+**为什么不先留空**：留空即退回 RRF，零风险，但用户明确要重排。适配本身十几行且有 mock 测试兜底，风险可控；真正的未知是限速，在探针阶段解决；WorkspaceId 后来证实不需要（2026-09-08）。
 
 ### D6：分时定价属于运维习惯，不写进代码
 
@@ -132,6 +132,5 @@ clone → parse → summarize ──────► embed ──────► 
 
 ## Open Questions
 
-- **百炼 WorkspaceId**：重排端点域名需要它，用户要在百炼控制台查。拿到前重排先留空（退回 RRF），不阻塞其他三个槽位的切换。
 - **限速档位**：百炼对该账号的 RPM/TPM 未知，探针压测后决定是否申请提额。
 - **usage 字段未落日志**：SDK 返回的 token 用量目前没有记录，导致成本只能靠账单反推、无法按项目或阶段归因。修它很小，但属于可观测性而非本次范围，待定是否并入。

@@ -5,7 +5,7 @@
 - [x] 1.3 维度实测：`qwen3.7-text-embedding-flash` 带 `dimensions=1024` 与不带各请求一次，确认实际返回维度都是 1024——D2 的「延迟一步失效」就防在这里 ✅ 不带 `dimensions` 与带 1024 均返回 1024，带 768 返回 768（参数生效）；批量 10 条 200，usage 190 token
 - [x] 1.4 限速探测：对 `qwen3.8-flash` 做并发 4、连发 20 次的压测，记录是否出现 429；触发则在控制台申请提额（D5） ✅ 并发 4 × 5 轮 = 20 次全部 200，零 429。**另发现**：`qwen3.8-flash` 默认开思考——摘要规模 prompt 默认 5.8s / completion 444（reasoning 379），顶层 `enable_thinking:false` 后 1.3s / 66，正文完整。已派「后端」加 `LLM_ENABLE_THINKING` 开关（三处调用经 `extra_body` 下发）
 - [x] 1.5 记录调用前后的账户余额差，得到实际单价，与文档价比对 百炼兼容模式无余额端点，单价以控制台账单核对；探针 usage 已记（嵌入 10 条 190 token、对话 1025+66）
-- [ ] 1.6 **需用户提供百炼 WorkspaceId**；用 `qwen3.7-text-rerank` 的原生端点发一次 2 文档请求，记录响应形状（应为 `output.results[].index/relevance_score`），供 D7 适配的测试夹具对照
+- [x] 1.6 **需用户提供百炼 WorkspaceId**；用 `qwen3.7-text-rerank` 的原生端点发一次 2 文档请求，记录响应形状（应为 `output.results[].index/relevance_score`），供 D7 适配的测试夹具对照 ✅ 2026-09-08：官方端点 `dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank` **不需要 WorkspaceId**（此前文档抓到的是 maas 业务空间域名）；响应顶层 `output/request_id/usage`，`output.results[].index/relevance_score` 与适配代码一致
 
 ## 2. 质量基线（换之前必须有对照）
 
@@ -39,7 +39,7 @@
 
 ## 6. 开启重排与验收
 
-- [ ] 6.1 配 `RERANK_PROVIDER=dashscope`、`RERANK_BASE_URL=<含 WorkspaceId 的完整端点>`、`RERANK_MODEL=qwen3.7-text-rerank`、`RERANK_API_KEY`；重建 backend；发一次问答，日志无 `rerank 调用失败` 即接通
+- [x] 6.1 配 `RERANK_PROVIDER=dashscope`、`RERANK_BASE_URL=<含 WorkspaceId 的完整端点>`、`RERANK_MODEL=qwen3.7-text-rerank`、`RERANK_API_KEY`；重建 backend；发一次问答，日志无 `rerank 调用失败` 即接通 ✅ 2026-09-08：`RERANK_PROVIDER=dashscope` + 三项已配（key 在服务器内复制自 EMBEDDING_API_KEY），backend 重建后用应用自己的 `reranker.rerank()` 实测排序正确、0.32s，零失败日志
 - [ ] 6.2 用与 2.1 相同的评测集与配置指纹口径重跑 eval，与基线逐项比对
 - [ ] 6.3 指标不低于基线 90% → 保留；低于 → 先关重排复测定位是哪一层退化，嵌入退化则按 design 回滚路径还原（摘要/问答模型的切换独立保留）
 - [ ] 6.4 重跑 2.3 的人工抽查查询，确认真实项目上的检索结果没有明显退化
