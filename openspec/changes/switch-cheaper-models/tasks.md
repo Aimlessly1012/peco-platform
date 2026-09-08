@@ -49,7 +49,7 @@
 
 - [ ] 7.1 `services/rag/.env.example` 默认值改为定案模型与百炼 `baseUrl`（`config.py` 的默认本就是百炼，两处对齐）
 - [ ] 7.2 `deploy/server-notes/README.md` 补：供应商切换日期、四个槽位定案、大仓库索引排在低价时段（D6）
-- [ ] 7.3 硅基流动那把 key 从两份 `.env`（本地与服务器）里移除；本地 `services/rag/.env` 的嵌入配置与线上对齐，消除 2.1 提到的漂移
+- [ ] 7.3 硅基流动那把 key 从两份 `.env`（本地与服务器）里移除；本地 `services/rag/.env` 的嵌入配置与线上对齐，消除 2.1 提到的漂移（**2026-09-08 纠正**：此前汇报「`RERANK_*` 仍空」不实——线上一直指着硅基流动 `Qwen3-Reranker-8B` 与余额为 0 的旧 key，每次问答先撞 402 再降级 RRF。已清空三项 `RERANK_*` 并重建 backend，`rerank_enabled=False`；线上 `.env` 已无硅基流动 key，本地那份待清）
 - [ ] 7.4 `openspec validate --all --strict` 全过，归档本 change
 - [ ] 7.5 遗留议题登记（不在本次范围）：OOM 重跑导致摘要重烧、402 重试风暴、`usage` 字段未落日志导致成本无法按阶段归因
 
